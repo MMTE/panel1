@@ -1,9 +1,9 @@
 import { pgTable, uuid, timestamp, boolean, pgEnum } from 'drizzle-orm/pg-core';
 import { relations } from 'drizzle-orm';
-import { clients } from './clients.js';
-import { plans } from './plans.js';
-import { tenants } from './tenants.js';
-import { invoices } from './invoices.js';
+import { clients } from './clients';
+import { plans } from './plans';
+import { tenants } from './tenants';
+import { invoices } from './invoices';
 
 export const subscriptionStatusEnum = pgEnum('subscription_status', ['ACTIVE', 'INACTIVE', 'CANCELLED', 'PAST_DUE']);
 

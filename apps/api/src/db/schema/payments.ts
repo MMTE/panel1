@@ -1,7 +1,7 @@
 import { pgTable, uuid, decimal, text, timestamp, jsonb, pgEnum } from 'drizzle-orm/pg-core';
 import { relations } from 'drizzle-orm';
-import { invoices } from './invoices.js';
-import { tenants } from './tenants.js';
+import { invoices } from './invoices';
+import { tenants } from './tenants';
 
 export const paymentStatusEnum = pgEnum('payment_status', ['PENDING', 'COMPLETED', 'FAILED', 'REFUNDED']);
 

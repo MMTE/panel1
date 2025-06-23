@@ -2,8 +2,8 @@ import express from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
 import { createExpressMiddleware } from '@trpc/server/adapters/express';
-import { appRouter } from './routers/index.js';
-import { createContext } from './trpc/context.js';
+import { appRouter } from './routers/index';
+import { createContext } from './trpc/context';
 import dotenv from 'dotenv';
 
 // Load environment variables
@@ -24,7 +24,7 @@ app.get('/health', (req, res) => {
   res.json({ 
     status: 'ok', 
     timestamp: new Date().toISOString(),
-    version: process.env.npm_package_version || '0.1.0'
+    version: process.env.npm_package_version || '0.1.0.js'
   });
 });
 

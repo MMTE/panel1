@@ -1,7 +1,7 @@
 import { pgTable, uuid, text, decimal, boolean, timestamp, jsonb, integer, pgEnum } from 'drizzle-orm/pg-core';
 import { relations } from 'drizzle-orm';
-import { tenants } from './tenants.js';
-import { subscriptions } from './subscriptions.js';
+import { tenants } from './tenants';
+import { subscriptions } from './subscriptions';
 
 export const billingIntervalEnum = pgEnum('billing_interval', ['MONTHLY', 'YEARLY', 'WEEKLY', 'DAILY']);
 

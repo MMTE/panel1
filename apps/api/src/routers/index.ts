@@ -1,10 +1,10 @@
-import { router } from '../trpc/trpc.js';
-import { authRouter } from './auth.js';
-import { usersRouter } from './users.js';
-import { plansRouter } from './plans.js';
-import { clientsRouter } from './clients.js';
-import { invoicesRouter } from './invoices.js';
-import { tenantsRouter } from './tenants.js';
+import { router } from '../trpc/trpc';
+import { authRouter } from './auth';
+import { usersRouter } from './users';
+import { plansRouter } from './plans';
+import { clientsRouter } from './clients';
+import { invoicesRouter } from './invoices';
+import { tenantsRouter } from './tenants';
 
 export const appRouter = router({
   auth: authRouter,

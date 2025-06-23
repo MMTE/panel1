@@ -1,6 +1,6 @@
 import { pgTable, uuid, text, integer, decimal } from 'drizzle-orm/pg-core';
 import { relations } from 'drizzle-orm';
-import { invoices } from './invoices.js';
+import { invoices } from './invoices';
 
 export const invoiceItems = pgTable('invoice_items', {
   id: uuid('id').primaryKey().defaultRandom(),

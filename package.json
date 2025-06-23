@@ -1,7 +1,7 @@
 {
   "name": "panel1",
   "version": "0.1.0",
-  "description": "The Developer-First Billing & Provisioning Platform",
+  "description": "The Developer-First Billing & Provisioning Platform - Full Stack TypeScript with tRPC",
   "private": true,
   "type": "module",
   "workspaces": [
@@ -9,11 +9,16 @@
     "packages/*"
   ],
   "scripts": {
-    "dev": "vite",
-    "build": "tsc && vite build",
+    "dev": "concurrently \"npm:dev:api\" \"npm:dev:web\"",
+    "dev:api": "npm run dev --workspace=@panel1/api",
+    "dev:web": "vite",
+    "build": "npm run build --workspaces",
     "preview": "vite preview",
     "lint": "eslint . --ext ts,tsx --report-unused-disable-directives --max-warnings 0",
-    "test": "vitest"
+    "test": "vitest",
+    "db:generate": "npm run db:generate --workspace=@panel1/api",
+    "db:migrate": "npm run db:migrate --workspace=@panel1/api",
+    "db:studio": "npm run db:studio --workspace=@panel1/api"
   },
   "keywords": [
     "billing",
@@ -22,7 +27,8 @@
     "hosting",
     "open-source",
     "typescript",
-    "supabase"
+    "trpc",
+    "drizzle"
   ],
   "author": "Panel1 Team",
   "license": "MIT",
@@ -35,11 +41,15 @@
   },
   "homepage": "https://panel1.dev",
   "dependencies": {
-    "@supabase/supabase-js": "^2.39.0",
+    "@trpc/client": "^10.45.0",
+    "@trpc/server": "^10.45.0",
+    "@trpc/react-query": "^10.45.0",
+    "@tanstack/react-query": "^4.36.1",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
     "react-router-dom": "^6.20.1",
-    "lucide-react": "^0.344.0"
+    "lucide-react": "^0.344.0",
+    "zod": "^3.22.4"
   },
   "devDependencies": {
     "@types/react": "^18.2.43",
@@ -55,7 +65,8 @@
     "tailwindcss": "^3.3.6",
     "typescript": "^5.5.3",
     "vite": "^5.0.8",
-    "vitest": "^1.1.0"
+    "vitest": "^1.1.0",
+    "concurrently": "^8.2.2"
   },
   "engines": {
     "node": ">=18.0.0",

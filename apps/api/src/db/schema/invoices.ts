@@ -1,11 +1,11 @@
 import { pgTable, uuid, text, decimal, timestamp, pgEnum } from 'drizzle-orm/pg-core';
 import { relations } from 'drizzle-orm';
-import { clients } from './clients.js';
-import { users } from './users.js';
-import { subscriptions } from './subscriptions.js';
-import { tenants } from './tenants.js';
-import { invoiceItems } from './invoice-items.js';
-import { payments } from './payments.js';
+import { clients } from './clients';
+import { users } from './users';
+import { subscriptions } from './subscriptions';
+import { tenants } from './tenants';
+import { invoiceItems } from './invoice-items';
+import { payments } from './payments';
 
 export const invoiceStatusEnum = pgEnum('invoice_status', ['DRAFT', 'PENDING', 'PAID', 'OVERDUE', 'CANCELLED']);
 

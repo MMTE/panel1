@@ -17,12 +17,7 @@ export const queryClient = new QueryClient({
 // Get token from localStorage
 function getAuthToken(): string | null {
   if (typeof window === 'undefined') return null;
-  try {
-    return localStorage.getItem('auth_token');
-  } catch (error) {
-    console.warn('Failed to access localStorage:', error);
-    return null;
-  }
+  return localStorage.getItem('auth_token');
 }
 
 export const trpcClient = trpc.createClient({
