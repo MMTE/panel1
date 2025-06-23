@@ -1,7 +1,7 @@
 import { z } from 'zod';
-import { router, protectedProcedure, adminProcedure, tenantProcedure } from '../trpc/trpc.js';
-import { plans } from '../db/schema/index.js';
-import { eq, and, desc } from 'drizzle-orm';
+import { router, publicProcedure, protectedProcedure, adminProcedure, tenantProcedure } from '../trpc/trpc.js';
+import { db, plans, subscriptions } from '../db/index.js';
+import { eq, and, desc, count, asc } from 'drizzle-orm';
 import { TRPCError } from '@trpc/server';
 
 export const plansRouter = router({
@@ -15,7 +15,7 @@ export const plansRouter = router({
         ...(input.activeOnly ? [eq(plans.isActive, true)] : []),
       ];
 
-      const allPlans = await ctx.db
+      const allPlans = await db
         .select()
         .from(plans)
         .where(conditions.length > 0 ? and(...conditions) : undefined)
@@ -34,7 +34,7 @@ export const plansRouter = router({
         ...(ctx.tenantId ? [eq(plans.tenantId, ctx.tenantId)] : []),
       ];
 
-      const [plan] = await ctx.db
+      const [plan] = await db
         .select()
         .from(plans)
         .where(and(...conditions))
@@ -62,11 +62,11 @@ export const plansRouter = router({
       setupFee: z.string().regex(/^\d+(\.\d{1,2})?$/).default('0'),
     }))
     .mutation(async ({ input, ctx }) => {
-      const [newPlan] = await ctx.db
+      const [newPlan] = await db
         .insert(plans)
         .values({
           ...input,
-          tenantId: ctx.tenantId,
+          tenantId: ctx.tenantId!,
         })
         .returning();
 
@@ -94,7 +94,7 @@ export const plansRouter = router({
         ...(ctx.tenantId ? [eq(plans.tenantId, ctx.tenantId)] : []),
       ];
 
-      const [updatedPlan] = await ctx.db
+      const [updatedPlan] = await db
         .update(plans)
         .set({
           ...updateData,
@@ -123,7 +123,7 @@ export const plansRouter = router({
         ...(ctx.tenantId ? [eq(plans.tenantId, ctx.tenantId)] : []),
       ];
 
-      const [deletedPlan] = await ctx.db
+      const [deletedPlan] = await db
         .delete(plans)
         .where(and(...conditions))
         .returning({ id: plans.id });

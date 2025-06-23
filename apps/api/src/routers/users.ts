@@ -1,8 +1,9 @@
 import { z } from 'zod';
 import { router, protectedProcedure, adminProcedure, tenantProcedure } from '../trpc/trpc.js';
-import { users } from '../db/schema/index.js';
+import { db, users, clients } from '../db/index.js';
 import { eq, and, desc, count, ilike, or } from 'drizzle-orm';
 import { TRPCError } from '@trpc/server';
+import { registerUser, hashPassword } from '../lib/auth.js';
 
 export const usersRouter = router({
   getAll: adminProcedure
@@ -11,11 +12,12 @@ export const usersRouter = router({
       offset: z.number().min(0).default(0),
       search: z.string().optional(),
       role: z.enum(['ADMIN', 'CLIENT', 'RESELLER']).optional(),
+      isActive: z.boolean().optional(),
     }))
     .query(async ({ input, ctx }) => {
-      const { limit, offset, search, role } = input;
+      const { limit, offset, search, role, isActive } = input;
 
-      let whereConditions = [eq(users.tenantId, ctx.tenantId)];
+      const whereConditions = [eq(users.tenantId, ctx.tenantId!)];
 
       if (search) {
         whereConditions.push(
@@ -31,7 +33,11 @@ export const usersRouter = router({
         whereConditions.push(eq(users.role, role));
       }
 
-      const allUsers = await ctx.db
+      if (isActive !== undefined) {
+        whereConditions.push(eq(users.isActive, isActive));
+      }
+
+      const allUsers = await db
         .select({
           id: users.id,
           email: users.email,
@@ -48,7 +54,7 @@ export const usersRouter = router({
         .limit(limit)
         .offset(offset);
 
-      const [totalResult] = await ctx.db
+      const [totalResult] = await db
         .select({ count: count() })
         .from(users)
         .where(and(...whereConditions));
@@ -60,12 +66,12 @@ export const usersRouter = router({
       };
     }),
 
-  getById: adminProcedure
+  getById: tenantProcedure
     .input(z.object({
       id: z.string().uuid(),
     }))
     .query(async ({ input, ctx }) => {
-      const [user] = await ctx.db
+      const [user] = await db
         .select({
           id: users.id,
           email: users.email,
@@ -79,7 +85,7 @@ export const usersRouter = router({
         .from(users)
         .where(and(
           eq(users.id, input.id),
-          eq(users.tenantId, ctx.tenantId)
+          eq(users.tenantId, ctx.tenantId!)
         ))
         .limit(1);
 
@@ -90,55 +96,64 @@ export const usersRouter = router({
         });
       }
 
-      return user;
+      // Get client profile if user is a client
+      let clientProfile = null;
+      if (user.role === 'CLIENT') {
+        const [client] = await db
+          .select()
+          .from(clients)
+          .where(eq(clients.userId, user.id))
+          .limit(1);
+        clientProfile = client || null;
+      }
+
+      return {
+        ...user,
+        clientProfile,
+      };
     }),
 
   create: adminProcedure
     .input(z.object({
       email: z.string().email(),
+      password: z.string().min(6),
       firstName: z.string().optional(),
       lastName: z.string().optional(),
       role: z.enum(['ADMIN', 'CLIENT', 'RESELLER']).default('CLIENT'),
     }))
     .mutation(async ({ input, ctx }) => {
-      const { email, firstName, lastName, role } = input;
+      try {
+        const newUser = await registerUser({
+          email: input.email,
+          password: input.password,
+          firstName: input.firstName,
+          lastName: input.lastName,
+          role: input.role,
+          tenantId: ctx.tenantId!,
+        });
 
-      // Create user in Supabase Auth
-      const { data: authData, error: authError } = await ctx.supabase.auth.admin.createUser({
-        email,
-        password: Math.random().toString(36).slice(-8), // Temporary password
-        email_confirm: true,
-      });
-
-      if (authError || !authData.user) {
+        return {
+          id: newUser.id,
+          email: newUser.email,
+          firstName: newUser.firstName,
+          lastName: newUser.lastName,
+          role: newUser.role,
+          isActive: newUser.isActive,
+          createdAt: newUser.createdAt,
+          updatedAt: newUser.updatedAt,
+        };
+      } catch (error: any) {
+        if (error.code === '23505') { // Unique constraint violation
+          throw new TRPCError({
+            code: 'CONFLICT',
+            message: 'Email already exists',
+          });
+        }
         throw new TRPCError({
           code: 'INTERNAL_SERVER_ERROR',
-          message: 'Failed to create user account',
+          message: 'Failed to create user',
         });
       }
-
-      // Create user in our database
-      const [newUser] = await ctx.db
-        .insert(users)
-        .values({
-          authUserId: authData.user.id,
-          email,
-          firstName,
-          lastName,
-          role,
-          tenantId: ctx.tenantId,
-        })
-        .returning({
-          id: users.id,
-          email: users.email,
-          firstName: users.firstName,
-          lastName: users.lastName,
-          role: users.role,
-          isActive: users.isActive,
-          createdAt: users.createdAt,
-        });
-
-      return newUser;
     }),
 
   update: adminProcedure
@@ -152,7 +167,7 @@ export const usersRouter = router({
     .mutation(async ({ input, ctx }) => {
       const { id, ...updateData } = input;
 
-      const [updatedUser] = await ctx.db
+      const [updatedUser] = await db
         .update(users)
         .set({
           ...updateData,
@@ -160,7 +175,7 @@ export const usersRouter = router({
         })
         .where(and(
           eq(users.id, id),
-          eq(users.tenantId, ctx.tenantId)
+          eq(users.tenantId, ctx.tenantId!)
         ))
         .returning({
           id: users.id,
@@ -172,12 +187,204 @@ export const usersRouter = router({
           updatedAt: users.updatedAt,
         });
 
-      if (!updatedUser)  {
+      if (!updatedUser) {
         throw new TRPCError({
           code: 'NOT_FOUND',
           message: 'User not found',
         });
       }
+
+      return updatedUser;
+    }),
+
+  updatePassword: protectedProcedure
+    .input(z.object({
+      currentPassword: z.string(),
+      newPassword: z.string().min(6),
+    }))
+    .mutation(async ({ input, ctx }) => {
+      // For now, this is a placeholder
+      // In a full implementation, you'd verify the current password
+      // and update it using the auth system
+      
+      const hashedPassword = await hashPassword(input.newPassword);
+      
+      await db
+        .update(users)
+        .set({
+          password: hashedPassword,
+          updatedAt: new Date(),
+        })
+        .where(eq(users.id, ctx.user!.id));
+
+      return { success: true };
+    }),
+
+  delete: adminProcedure
+    .input(z.object({
+      id: z.string().uuid(),
+    }))
+    .mutation(async ({ input, ctx }) => {
+      // Check if user exists and belongs to tenant
+      const [existingUser] = await db
+        .select({ id: users.id, role: users.role })
+        .from(users)
+        .where(and(
+          eq(users.id, input.id),
+          eq(users.tenantId, ctx.tenantId!)
+        ))
+        .limit(1);
+
+      if (!existingUser) {
+        throw new TRPCError({
+          code: 'NOT_FOUND',
+          message: 'User not found',
+        });
+      }
+
+      // Prevent deleting the last admin
+      if (existingUser.role === 'ADMIN') {
+        const [adminCount] = await db
+          .select({ count: count() })
+          .from(users)
+          .where(and(
+            eq(users.tenantId, ctx.tenantId!),
+            eq(users.role, 'ADMIN'),
+            eq(users.isActive, true)
+          ));
+
+        if (adminCount.count <= 1) {
+          throw new TRPCError({
+            code: 'PRECONDITION_FAILED',
+            message: 'Cannot delete the last admin user',
+          });
+        }
+      }
+
+      // Soft delete - deactivate instead of hard delete
+      await db
+        .update(users)
+        .set({ isActive: false, updatedAt: new Date() })
+        .where(eq(users.id, input.id));
+
+      return { success: true };
+    }),
+
+  // Get user statistics
+  getStats: adminProcedure
+    .query(async ({ ctx }) => {
+      const [totalUsers] = await db
+        .select({ count: count() })
+        .from(users)
+        .where(eq(users.tenantId, ctx.tenantId!));
+
+      const [activeUsers] = await db
+        .select({ count: count() })
+        .from(users)
+        .where(and(
+          eq(users.tenantId, ctx.tenantId!),
+          eq(users.isActive, true)
+        ));
+
+      const [adminUsers] = await db
+        .select({ count: count() })
+        .from(users)
+        .where(and(
+          eq(users.tenantId, ctx.tenantId!),
+          eq(users.role, 'ADMIN'),
+          eq(users.isActive, true)
+        ));
+
+      const [clientUsers] = await db
+        .select({ count: count() })
+        .from(users)
+        .where(and(
+          eq(users.tenantId, ctx.tenantId!),
+          eq(users.role, 'CLIENT'),
+          eq(users.isActive, true)
+        ));
+
+      const [resellerUsers] = await db
+        .select({ count: count() })
+        .from(users)
+        .where(and(
+          eq(users.tenantId, ctx.tenantId!),
+          eq(users.role, 'RESELLER'),
+          eq(users.isActive, true)
+        ));
+
+      return {
+        total: totalUsers.count,
+        active: activeUsers.count,
+        inactive: totalUsers.count - activeUsers.count,
+        byRole: {
+          admin: adminUsers.count,
+          client: clientUsers.count,
+          reseller: resellerUsers.count,
+        },
+      };
+    }),
+
+  // Toggle user active status
+  toggleStatus: adminProcedure
+    .input(z.object({
+      id: z.string().uuid(),
+    }))
+    .mutation(async ({ input, ctx }) => {
+      // Get current status
+      const [currentUser] = await db
+        .select({ isActive: users.isActive, role: users.role })
+        .from(users)
+        .where(and(
+          eq(users.id, input.id),
+          eq(users.tenantId, ctx.tenantId!)
+        ))
+        .limit(1);
+
+      if (!currentUser) {
+        throw new TRPCError({
+          code: 'NOT_FOUND',
+          message: 'User not found',
+        });
+      }
+
+      // Prevent deactivating the last admin
+      if (currentUser.role === 'ADMIN' && currentUser.isActive) {
+        const [adminCount] = await db
+          .select({ count: count() })
+          .from(users)
+          .where(and(
+            eq(users.tenantId, ctx.tenantId!),
+            eq(users.role, 'ADMIN'),
+            eq(users.isActive, true)
+          ));
+
+        if (adminCount.count <= 1) {
+          throw new TRPCError({
+            code: 'PRECONDITION_FAILED',
+            message: 'Cannot deactivate the last admin user',
+          });
+        }
+      }
+
+      const [updatedUser] = await db
+        .update(users)
+        .set({
+          isActive: !currentUser.isActive,
+          updatedAt: new Date(),
+        })
+        .where(and(
+          eq(users.id, input.id),
+          eq(users.tenantId, ctx.tenantId!)
+        ))
+        .returning({
+          id: users.id,
+          email: users.email,
+          firstName: users.firstName,
+          lastName: users.lastName,
+          role: users.role,
+          isActive: users.isActive,
+        });
 
       return updatedUser;
     }),

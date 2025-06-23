@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { supabase } from '../lib/supabase';
+// import { supabase } from '../lib/supabase'; // TODO: Replace with tRPC
 import { useAuth } from './useAuth';
 
 export interface ClientProfile {
@@ -158,133 +158,9 @@ export function useClientData() {
         setLoading(true);
         setError(null);
 
-        // Fetch user profile
-        const { data: userData, error: userError } = await supabase
-          .from('users')
-          .select('id, email, first_name, last_name')
-          .eq('auth_user_id', user.id)
-          .single();
-
-        if (userError) throw userError;
-
-        // Fetch client profile
-        const { data: clientData, error: clientError } = await supabase
-          .from('clients')
-          .select('*')
-          .eq('user_id', userData.id)
-          .single();
-
-        if (clientError && clientError.code !== 'PGRST116') throw clientError; // PGRST116 is "no rows returned"
-
-        // Fetch subscriptions
-        const { data: subscriptionsData, error: subscriptionsError } = await supabase
-          .from('subscriptions')
-          .select(`
-            id, 
-            status, 
-            current_period_start, 
-            current_period_end, 
-            next_billing_date,
-            plans (
-              id, 
-              name, 
-              price, 
-              interval
-            )
-          `)
-          .eq('client_id', clientData?.id || '')
-          .eq('status', 'ACTIVE');
-
-        if (subscriptionsError) throw subscriptionsError;
-
-        // Fetch invoices
-        const { data: invoicesData, error: invoicesError } = await supabase
-          .from('invoices')
-          .select(`
-            id, 
-            invoice_number, 
-            status, 
-            total, 
-            due_date, 
-            paid_at, 
-            created_at,
-            invoice_items (
-              description,
-              unit_price,
-              quantity
-            )
-          `)
-          .eq('client_id', clientData?.id || '')
-          .order('created_at', { ascending: false });
-
-        if (invoicesError) throw invoicesError;
-
-        // Calculate stats
-        const totalSpent = invoicesData
-          .filter(invoice => invoice.status === 'PAID')
-          .reduce((sum, invoice) => sum + parseFloat(invoice.total), 0);
-
-        const pendingInvoices = invoicesData.filter(invoice => invoice.status === 'PENDING').length;
-        
-        const activeSubscriptions = subscriptionsData.length;
-        
-        const nextBillingDates = subscriptionsData
-          .map(sub => sub.next_billing_date)
-          .filter(date => date)
-          .sort();
-        
-        const nextBilling = nextBillingDates.length > 0 ? nextBillingDates[0] : null;
-
-        // Format the data
-        const formattedData: ClientData = {
-          profile: {
-            id: clientData?.id || userData.id,
-            company_name: clientData?.company_name || '',
-            first_name: userData.first_name || '',
-            last_name: userData.last_name || '',
-            email: userData.email,
-            phone: clientData?.phone || '',
-            address: clientData?.address || '',
-            city: clientData?.city || '',
-            state: clientData?.state || '',
-            zip_code: clientData?.zip_code || '',
-            country: clientData?.country || ''
-          },
-          subscriptions: subscriptionsData.map(sub => ({
-            id: sub.id,
-            plan: {
-              id: sub.plans.id,
-              name: sub.plans.name,
-              price: parseFloat(sub.plans.price),
-              interval: sub.plans.interval
-            },
-            status: sub.status,
-            current_period_start: sub.current_period_start,
-            current_period_end: sub.current_period_end,
-            next_billing_date: sub.next_billing_date
-          })),
-          invoices: invoicesData.map(invoice => ({
-            id: invoice.id,
-            invoice_number: invoice.invoice_number,
-            status: invoice.status,
-            total: parseFloat(invoice.total),
-            due_date: invoice.due_date,
-            paid_at: invoice.paid_at,
-            created_at: invoice.created_at,
-            items: invoice.invoice_items.map(item => ({
-              description: item.description,
-              amount: parseFloat(item.unit_price) * item.quantity
-            }))
-          })),
-          stats: {
-            totalSpent,
-            activeSubscriptions,
-            pendingInvoices,
-            nextBilling: nextBilling || new Date().toISOString()
-          }
-        };
-
-        setClientData(formattedData);
+        // TODO: Replace with tRPC calls
+        // For now, use mock data
+        setClientData(mockClientData);
       } catch (err) {
         console.error('Error fetching client data:', err);
         setError(err instanceof Error ? err.message : 'An error occurred while fetching client data');
@@ -330,24 +206,15 @@ export function useClientData() {
       if (updates.zip_code) clientUpdates.zip_code = updates.zip_code;
       if (updates.country) clientUpdates.country = updates.country;
 
+      // TODO: Replace with tRPC calls
       // Update user profile if needed
       if (Object.keys(userUpdates).length > 0) {
-        const { error: userError } = await supabase
-          .from('users')
-          .update(userUpdates)
-          .eq('auth_user_id', user.id);
-
-        if (userError) throw userError;
+        console.log('TODO: Update user profile', userUpdates);
       }
 
       // Update client profile if needed
       if (Object.keys(clientUpdates).length > 0) {
-        const { error: clientError } = await supabase
-          .from('clients')
-          .update(clientUpdates)
-          .eq('id', clientData.profile.id);
-
-        if (clientError) throw clientError;
+        console.log('TODO: Update client profile', clientUpdates);
       }
 
       // Update local state
@@ -400,17 +267,8 @@ export function useClientData() {
     if (!user || !clientData) return false;
 
     try {
-      // In a real implementation, this would integrate with a payment gateway
-      // For now, we'll just update the invoice status
-      const { error } = await supabase
-        .from('invoices')
-        .update({
-          status: 'PAID',
-          paid_at: new Date().toISOString()
-        })
-        .eq('id', invoiceId);
-
-      if (error) throw error;
+      // TODO: Replace with tRPC call
+      console.log('TODO: Pay invoice', invoiceId);
 
       // Update local state
       if (clientData) {
@@ -474,15 +332,8 @@ export function useClientData() {
 
     try {
       // Update subscription status
-      const { error } = await supabase
-        .from('subscriptions')
-        .update({
-          status: 'CANCELLED',
-          cancel_at_period_end: true
-        })
-        .eq('id', subscriptionId);
-
-      if (error) throw error;
+      // TODO: Replace with tRPC call
+      console.log('TODO: Cancel subscription', subscriptionId);
 
       // Update local state
       if (clientData) {

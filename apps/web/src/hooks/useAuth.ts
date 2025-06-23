@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { supabase } from '../lib/supabase';
+// import { supabase } from '../lib/supabase'; // TODO: Replace with tRPC
 import { auditLogger } from '../lib/audit/AuditLogger';
 import { emitEvent } from '../lib/events/EventEmitter';
 import type { User, Session } from '@supabase/supabase-js';

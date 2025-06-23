@@ -1,0 +1,201 @@
+import jwt from 'jsonwebtoken';
+import bcrypt from 'bcryptjs';
+import { db } from '../db/index.js';
+import { users, sessions, type User, type NewUser, type NewSession } from '../db/schema/users.js';
+import { eq, and, gte, lt } from 'drizzle-orm';
+
+const JWT_SECRET = process.env.JWT_SECRET || 'your-super-secret-jwt-key';
+const JWT_EXPIRES_IN = '7d';
+const SESSION_EXPIRES_IN = 7 * 24 * 60 * 60 * 1000; // 7 days in milliseconds
+
+export interface AuthUser {
+  id: string;
+  email: string;
+  firstName?: string | null;
+  lastName?: string | null;
+  role: 'ADMIN' | 'CLIENT' | 'RESELLER';
+  tenantId?: string | null;
+}
+
+export interface JWTPayload {
+  userId: string;
+  email: string;
+  role: string;
+  tenantId?: string | null;
+}
+
+/**
+ * Hash a password using bcrypt
+ */
+export async function hashPassword(password: string): Promise<string> {
+  const saltRounds = 12;
+  return bcrypt.hash(password, saltRounds);
+}
+
+/**
+ * Verify a password against its hash
+ */
+export async function verifyPassword(password: string, hash: string): Promise<boolean> {
+  return bcrypt.compare(password, hash);
+}
+
+/**
+ * Generate a JWT token
+ */
+export function generateToken(payload: JWTPayload): string {
+  return jwt.sign(payload, JWT_SECRET, { expiresIn: JWT_EXPIRES_IN });
+}
+
+/**
+ * Verify and decode a JWT token
+ */
+export function verifyToken(token: string): JWTPayload | null {
+  try {
+    return jwt.verify(token, JWT_SECRET) as JWTPayload;
+  } catch (error) {
+    return null;
+  }
+}
+
+/**
+ * Create a new session for a user
+ */
+export async function createSession(userId: string): Promise<string> {
+  const token = generateToken({ 
+    userId, 
+    email: '', // Will be filled when we get user data
+    role: 'CLIENT' // Default, will be updated
+  });
+  
+  const expiresAt = new Date(Date.now() + SESSION_EXPIRES_IN);
+  
+  await db.insert(sessions).values({
+    userId,
+    token,
+    expiresAt,
+  });
+  
+  return token;
+}
+
+/**
+ * Get session by token
+ */
+export async function getSessionByToken(token: string) {
+  const result = await db
+    .select()
+    .from(sessions)
+    .innerJoin(users, eq(sessions.userId, users.id))
+    .where(
+      and(
+        eq(sessions.token, token),
+        gte(sessions.expiresAt, new Date())
+      )
+    )
+    .limit(1);
+
+  return result[0] || null;
+}
+
+/**
+ * Delete a session (logout)
+ */
+export async function deleteSession(token: string): Promise<void> {
+  await db.delete(sessions).where(eq(sessions.token, token));
+}
+
+/**
+ * Clean up expired sessions
+ */
+export async function cleanupExpiredSessions(): Promise<void> {
+  await db.delete(sessions).where(
+    and(
+      lt(sessions.expiresAt, new Date())
+    )
+  );
+}
+
+/**
+ * Register a new user
+ */
+export async function registerUser(userData: {
+  email: string;
+  password: string;
+  firstName?: string;
+  lastName?: string;
+  role?: 'ADMIN' | 'CLIENT' | 'RESELLER';
+  tenantId?: string;
+}): Promise<User> {
+  const hashedPassword = await hashPassword(userData.password);
+  
+  const newUser: NewUser = {
+    email: userData.email,
+    password: hashedPassword,
+    firstName: userData.firstName || null,
+    lastName: userData.lastName || null,
+    role: userData.role || 'CLIENT',
+    tenantId: userData.tenantId || null,
+  };
+
+  const [user] = await db.insert(users).values(newUser).returning();
+  return user;
+}
+
+/**
+ * Authenticate user by email and password
+ */
+export async function authenticateUser(email: string, password: string): Promise<AuthUser | null> {
+  const [user] = await db
+    .select()
+    .from(users)
+    .where(and(
+      eq(users.email, email),
+      eq(users.isActive, true)
+    ))
+    .limit(1);
+
+  if (!user) {
+    return null;
+  }
+
+  const isValidPassword = await verifyPassword(password, user.password);
+  if (!isValidPassword) {
+    return null;
+  }
+
+  return {
+    id: user.id,
+    email: user.email,
+    firstName: user.firstName,
+    lastName: user.lastName,
+    role: user.role as 'ADMIN' | 'CLIENT' | 'RESELLER',
+    tenantId: user.tenantId,
+  };
+}
+
+/**
+ * Get user by ID
+ */
+export async function getUserById(id: string): Promise<AuthUser | null> {
+  const [user] = await db
+    .select()
+    .from(users)
+    .where(and(
+      eq(users.id, id),
+      eq(users.isActive, true)
+    ))
+    .limit(1);
+
+  if (!user) {
+    return null;
+  }
+
+  return {
+    id: user.id,
+    email: user.email,
+    firstName: user.firstName,
+    lastName: user.lastName,
+    role: user.role as 'ADMIN' | 'CLIENT' | 'RESELLER',
+    tenantId: user.tenantId,
+  };
+} 

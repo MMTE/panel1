@@ -1,4 +1,4 @@
-import { supabase } from '../supabase';
+// import { supabase } from '../supabase'; // TODO: Replace with tRPC
 import { tenantManager } from '../tenant/TenantManager';
 import type { Panel1EventMap } from '@panel1/plugin-sdk';
 

@@ -1,4 +1,4 @@
-import { supabase } from '../supabase';
+// import { supabase } from '../supabase'; // TODO: Replace with tRPC
 import { tenantManager } from '../tenant/TenantManager';
 
 export interface AuditLogEntry {

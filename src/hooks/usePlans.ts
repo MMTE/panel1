@@ -1,53 +1,27 @@
-import { useState, useEffect } from 'react';
-import { supabase } from '../lib/supabase';
+import { trpc } from '../api/trpc';
 
 export interface Plan {
   id: string;
   name: string;
   description: string | null;
-  price: number;
+  price: string;
   currency: string;
   interval: 'MONTHLY' | 'YEARLY' | 'WEEKLY' | 'DAILY';
-  is_active: boolean;
+  isActive: boolean;
   features: any | null;
-  created_at: string;
-  updated_at: string;
+  createdAt: Date;
+  updatedAt: Date;
 }
 
 export function usePlans() {
-  const [plans, setPlans] = useState<Plan[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    fetchPlans();
-  }, []);
-
-  const fetchPlans = async () => {
-    try {
-      setLoading(true);
-      const { data, error } = await supabase
-        .from('plans')
-        .select('*')
-        .eq('is_active', true)
-        .order('price', { ascending: true });
-
-      if (error) {
-        setError(error.message);
-      } else {
-        setPlans(data || []);
-      }
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'An error occurred');
-    } finally {
-      setLoading(false);
-    }
-  };
+  const { data: plans = [], isLoading: loading, error, refetch } = trpc.plans.getAll.useQuery({
+    activeOnly: true,
+  });
 
   return {
     plans,
     loading,
-    error,
-    refetch: fetchPlans,
+    error: error?.message || null,
+    refetch,
   };
 }

@@ -7,4 +7,22 @@ export default defineConfig({
   optimizeDeps: {
     exclude: ['lucide-react'],
   },
+  define: {
+    global: 'globalThis',
+  },
+  server: {
+    fs: {
+      strict: false,
+    },
+  },
+  build: {
+    target: ['chrome58', 'firefox57', 'safari11'],
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          vendor: ['react', 'react-dom'],
+        },
+      },
+    },
+  },
 });

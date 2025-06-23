@@ -21,7 +21,7 @@ import {
 } from 'lucide-react';
 import { PluginSlot } from '../../lib/plugins';
 import { useAuth } from '../../hooks/useAuth';
-import { supabase } from '../../lib/supabase';
+// import { supabase } from '../../lib/supabase'; // TODO: Replace with tRPC
 
 export function AdminClients() {
   const { user, isDemoMode } = useAuth();
@@ -104,18 +104,9 @@ export function AdminClients() {
   const fetchClients = async () => {
     try {
       setLoading(true);
-      const { data, error } = await supabase
-        .from('clients')
-        .select(`
-          *,
-          users!inner(email, first_name, last_name),
-          invoices(count),
-          subscriptions(count)
-        `)
-        .order('created_at', { ascending: false });
-
-      if (error) throw error;
-      setClients(data || []);
+      // TODO: Replace with tRPC call
+      console.log('TODO: Fetch clients from tRPC');
+      setClients([]); // Use empty array for now
     } catch (error) {
       console.error('Error fetching clients:', error);
     } finally {

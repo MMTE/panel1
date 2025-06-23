@@ -10,7 +10,7 @@ export class PluginLoader {
   static async loadFromFile(filePath: string): Promise<Plugin> {
     try {
       // In a real implementation, this would load from the filesystem
-      const module = await import(filePath);
+      const module = await import(/* @vite-ignore */ filePath);
       return module.default;
     } catch (error) {
       throw new Error(`Failed to load plugin from file ${filePath}: ${error}`);
@@ -37,7 +37,7 @@ export class PluginLoader {
       const blobUrl = URL.createObjectURL(blob);
       
       try {
-        const module = await import(blobUrl);
+        const module = await import(/* @vite-ignore */ blobUrl);
         return module.default;
       } finally {
         URL.revokeObjectURL(blobUrl);

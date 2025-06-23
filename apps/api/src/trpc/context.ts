@@ -1,69 +1,39 @@
-import type { Request, Response } from 'express';
-import { createClient } from '@supabase/supabase-js';
-import { db } from '../db/index.js';
-import { users } from '../db/schema/index.js';
-import { eq } from 'drizzle-orm';
-
-const supabase = createClient(
-  process.env.SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!
-);
+import type { CreateExpressContextOptions } from '@trpc/server/adapters/express';
+import { getSessionByToken, type AuthUser } from '../lib/auth.js';
 
 export interface Context {
-  req: Request;
-  res: Response;
-  db: typeof db;
-  supabase: typeof supabase;
-  user?: {
-    id: string;
-    email: string;
-    role: string;
-    tenantId?: string;
-  };
-  tenantId?: string;
+  user: AuthUser | null;
+  tenantId: string | null;
 }
 
-export async function createContext({ req, res }: { req: Request; res: Response }): Promise<Context> {
-  // Get token from Authorization header
-  const token = req.headers.authorization?.replace('Bearer ', '');
-  
-  let user = undefined;
-  let tenantId = undefined;
-  
-  if (token) {
+export async function createContext({ req }: CreateExpressContextOptions): Promise<Context> {
+  // Extract token from Authorization header
+  const authHeader = req.headers.authorization;
+  let user: AuthUser | null = null;
+  let tenantId: string | null = null;
+
+  if (authHeader && authHeader.startsWith('Bearer ')) {
+    const token = authHeader.substring(7); // Remove 'Bearer ' prefix
+    
     try {
-      // Verify token with Supabase
-      const { data: { user: authUser }, error } = await supabase.auth.getUser(token);
-      
-      if (authUser && !error) {
-        // Get user details from our database
-        const [dbUser] = await db
-          .select()
-          .from(users)
-          .where(eq(users.authUserId, authUser.id))
-          .limit(1);
-        
-        if (dbUser && dbUser.isActive) {
-          user = {
-            id: dbUser.id,
-            email: dbUser.email,
-            role: dbUser.role || 'CLIENT',
-            tenantId: dbUser.tenantId || undefined,
-          };
-          tenantId = dbUser.tenantId || undefined;
-        }
+      const sessionData = await getSessionByToken(token);
+      if (sessionData) {
+        user = {
+          id: sessionData.users.id,
+          email: sessionData.users.email,
+          firstName: sessionData.users.firstName,
+          lastName: sessionData.users.lastName,
+          role: sessionData.users.role as 'ADMIN' | 'CLIENT' | 'RESELLER',
+          tenantId: sessionData.users.tenantId,
+        };
+        tenantId = sessionData.users.tenantId;
       }
     } catch (error) {
-      // Invalid token, user remains undefined
-      console.error('Auth error:', error);
+      console.error('Error validating session:', error);
     }
   }
 
   return {
-    req,
-    res,
-    db,
-    supabase,
     user,
     tenantId,
   };

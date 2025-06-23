@@ -1,4 +1,4 @@
-import { supabase } from '../supabase';
+// import { supabase } from '../supabase'; // TODO: Replace with tRPC
 import { auditLogger } from '../audit/AuditLogger';
 import { eventEmitter } from '../events/EventEmitter';
 import type {
@@ -29,15 +29,9 @@ export class PluginRegistry implements PluginRegistryInterface {
    */
   private async loadInstalledPlugins(): Promise<void> {
     try {
-      const { data: installedPlugins, error } = await supabase
-        .from('plugin_registry')
-        .select('*')
-        .eq('status', 'installed');
-
-      if (error) {
-        console.error('Failed to load installed plugins:', error);
-        return;
-      }
+      // TODO: Replace with tRPC call
+      console.log('TODO: Load installed plugins from database');
+      const installedPlugins: any[] = []; // Use empty array for now
 
       for (const pluginData of installedPlugins || []) {
         try {
@@ -146,17 +140,8 @@ export class PluginRegistry implements PluginRegistryInterface {
     this.plugins.delete(name);
     this.pluginInfo.delete(name);
 
-    // Remove from database
-    await supabase
-      .from('plugin_registry')
-      .delete()
-      .eq('name', name);
-
-    // Remove plugin settings
-    await supabase
-      .from('plugin_settings')
-      .delete()
-      .eq('plugin_id', name);
+    // TODO: Replace with tRPC calls
+    console.log('TODO: Remove plugin from database', name);
 
     // Log plugin uninstallation
     await auditLogger.logPluginAction('uninstall', name);
@@ -214,14 +199,8 @@ export class PluginRegistry implements PluginRegistryInterface {
     // Enable plugin
     this.enabledPlugins.add(name);
 
-    // Update database
-    await supabase
-      .from('plugin_registry')
-      .update({ 
-        enabled: true, 
-        enabled_at: new Date().toISOString() 
-      })
-      .eq('name', name);
+    // TODO: Replace with tRPC call
+    console.log('TODO: Update plugin enabled status in database', name);
 
     // Update plugin info
     const info = this.pluginInfo.get(name);
@@ -259,14 +238,8 @@ export class PluginRegistry implements PluginRegistryInterface {
     // Disable plugin
     this.enabledPlugins.delete(name);
 
-    // Update database
-    await supabase
-      .from('plugin_registry')
-      .update({ 
-        enabled: false, 
-        enabled_at: null 
-      })
-      .eq('name', name);
+    // TODO: Replace with tRPC call
+    console.log('TODO: Update plugin disabled status in database', name);
 
     // Update plugin info
     const info = this.pluginInfo.get(name);
@@ -472,61 +445,27 @@ export class PluginRegistry implements PluginRegistryInterface {
         error: (...args) => console.error(`[${pluginId}]`, ...args),
         debug: (...args) => console.debug(`[${pluginId}]`, ...args),
       },
-      supabase,
+      // supabase, // TODO: Replace with tRPC
       eventEmitter,
       auditLogger,
       async getPluginConfig<T>(id: string): Promise<T> {
-        const { data, error } = await supabase
-          .from('plugin_settings')
-          .select('settings')
-          .eq('plugin_id', id)
-          .single();
-
-        if (error) {
-          throw new Error(`Failed to get plugin config: ${error.message}`);
-        }
-
-        return data?.settings || {};
+        // TODO: Replace with tRPC call
+        console.log('TODO: Get plugin config', id);
+        return {} as T;
       },
       async setPluginConfig<T>(id: string, config: Partial<T>): Promise<void> {
-        const { error } = await supabase
-          .from('plugin_settings')
-          .upsert({
-            plugin_id: id,
-            settings: config,
-            updated_at: new Date().toISOString(),
-          });
-
-        if (error) {
-          throw new Error(`Failed to set plugin config: ${error.message}`);
-        }
-
+        // TODO: Replace with tRPC call
+        console.log('TODO: Set plugin config', id, config);
         // Log configuration change
         await auditLogger.logPluginAction('configure', id, config);
       },
       async createSettings<T>(settings: T): Promise<void> {
-        const { error } = await supabase
-          .from('plugin_settings')
-          .insert({
-            plugin_id: pluginId,
-            settings,
-            created_at: new Date().toISOString(),
-            updated_at: new Date().toISOString(),
-          });
-
-        if (error) {
-          throw new Error(`Failed to create plugin settings: ${error.message}`);
-        }
+        // TODO: Replace with tRPC call
+        console.log('TODO: Create plugin settings', pluginId, settings);
       },
       async deleteSettings(): Promise<void> {
-        const { error } = await supabase
-          .from('plugin_settings')
-          .delete()
-          .eq('plugin_id', pluginId);
-
-        if (error) {
-          throw new Error(`Failed to delete plugin settings: ${error.message}`);
-        }
+        // TODO: Replace with tRPC call
+        console.log('TODO: Delete plugin settings', pluginId);
       },
       translate: (key: string, replacements?: Record<string, string>) => {
         // TODO: Implement i18n translation
@@ -551,22 +490,8 @@ export class PluginRegistry implements PluginRegistryInterface {
    * Save plugin to database
    */
   private async savePluginToDatabase(plugin: Plugin, status: PluginStatus): Promise<void> {
-    const { error } = await supabase
-      .from('plugin_registry')
-      .upsert({
-        name: plugin.metadata.name,
-        version: plugin.metadata.version,
-        description: plugin.metadata.description,
-        author: plugin.metadata.author,
-        metadata: plugin.metadata,
-        status,
-        enabled: false,
-        installed_at: new Date().toISOString(),
-      });
-
-    if (error) {
-      throw new Error(`Failed to save plugin to database: ${error.message}`);
-    }
+    // TODO: Replace with tRPC call
+    console.log('TODO: Save plugin to database', plugin.metadata.name, status);
   }
 
   /**
@@ -574,15 +499,8 @@ export class PluginRegistry implements PluginRegistryInterface {
    */
   private async logPluginError(pluginId: string, operation: string, error: any): Promise<void> {
     try {
-      await supabase
-        .from('plugin_errors')
-        .insert({
-          plugin_id: pluginId,
-          operation,
-          error_message: error instanceof Error ? error.message : String(error),
-          error_stack: error instanceof Error ? error.stack : null,
-          occurred_at: new Date().toISOString(),
-        });
+      // TODO: Replace with tRPC call
+      console.log('TODO: Log plugin error to database', pluginId, operation, error);
     } catch (logError) {
       console.error('Failed to log plugin error:', logError);
     }

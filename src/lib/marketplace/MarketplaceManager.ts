@@ -1,4 +1,4 @@
-import { supabase } from '../supabase';
+// import { supabase } from '../supabase'; // TODO: Replace with tRPC
 
 export interface MarketplacePlugin {
   name: string;

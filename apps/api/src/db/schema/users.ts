@@ -8,8 +8,8 @@ export const userRoleEnum = pgEnum('user_role', ['ADMIN', 'CLIENT', 'RESELLER'])
 
 export const users = pgTable('users', {
   id: uuid('id').primaryKey().defaultRandom(),
-  authUserId: uuid('auth_user_id'),
   email: text('email').notNull().unique(),
+  password: text('password').notNull(),
   firstName: text('first_name'),
   lastName: text('last_name'),
   role: userRoleEnum('role').default('CLIENT'),
@@ -19,6 +19,14 @@ export const users = pgTable('users', {
   updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow(),
 });
 
+export const sessions = pgTable('sessions', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  userId: uuid('user_id').references(() => users.id, { onDelete: 'cascade' }).notNull(),
+  token: text('token').notNull().unique(),
+  expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+});
+
 export const usersRelations = relations(users, ({ one, many }) => ({
   tenant: one(tenants, {
     fields: [users.tenantId],
@@ -26,7 +34,17 @@ export const usersRelations = relations(users, ({ one, many }) => ({
   }),
   clients: many(clients),
   invoices: many(invoices),
+  sessions: many(sessions),
+}));
+
+export const sessionsRelations = relations(sessions, ({ one }) => ({
+  user: one(users, {
+    fields: [sessions.userId],
+    references: [users.id],
+  }),
 }));
 
 export type User = typeof users.$inferSelect;
 export type NewUser = typeof users.$inferInsert;
+export type Session = typeof sessions.$inferSelect;
+export type NewSession = typeof sessions.$inferInsert;

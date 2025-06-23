@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { router, protectedProcedure, adminProcedure, tenantProcedure } from '../trpc/trpc.js';
-import { invoices, invoiceItems, clients, users, subscriptions, payments } from '../db/schema/index.js';
+import { db, invoices, invoiceItems, clients, users, subscriptions, payments } from '../db/index.js';
 import { eq, and, desc, count, ilike, or, gte, lte } from 'drizzle-orm';
 import { TRPCError } from '@trpc/server';
 
@@ -17,7 +17,7 @@ export const invoicesRouter = router({
     .query(async ({ input, ctx }) => {
       const { limit, offset, search, status, startDate, endDate } = input;
 
-      let whereConditions = [eq(invoices.tenantId, ctx.tenantId)];
+      let whereConditions = [eq(invoices.tenantId, ctx.tenantId!)];
 
       if (search) {
         whereConditions.push(
@@ -41,7 +41,7 @@ export const invoicesRouter = router({
         whereConditions.push(lte(invoices.createdAt, endDate));
       }
 
-      const allInvoices = await ctx.db
+      const allInvoices = await db
         .select({
           id: invoices.id,
           invoiceNumber: invoices.invoiceNumber,
@@ -53,15 +53,11 @@ export const invoicesRouter = router({
           dueDate: invoices.dueDate,
           paidAt: invoices.paidAt,
           createdAt: invoices.createdAt,
-          client: {
-            id: clients.id,
-            companyName: clients.companyName,
-            user: {
-              email: users.email,
-              firstName: users.firstName,
-              lastName: users.lastName,
-            },
-          },
+          clientId: clients.id,
+          clientCompanyName: clients.companyName,
+          clientUserEmail: users.email,
+          clientUserFirstName: users.firstName,
+          clientUserLastName: users.lastName,
         })
         .from(invoices)
         .leftJoin(clients, eq(invoices.clientId, clients.id))
@@ -71,7 +67,7 @@ export const invoicesRouter = router({
         .limit(limit)
         .offset(offset);
 
-      const [totalResult] = await ctx.db
+      const [totalResult] = await db
         .select({ count: count() })
         .from(invoices)
         .leftJoin(clients, eq(invoices.clientId, clients.id))
@@ -102,15 +98,17 @@ export const invoicesRouter = router({
           dueDate: invoices.dueDate,
           paidAt: invoices.paidAt,
           createdAt: invoices.createdAt,
-          client: {
-            id: clients.id,
-            companyName: clients.companyName,
-            user: {
-              email: users.email,
-              firstName: users.firstName,
-              lastName: users.lastName,
-            },
-          },
+          updatedAt: invoices.updatedAt,
+          clientId: clients.id,
+          clientCompanyName: clients.companyName,
+          clientAddress: clients.address,
+          clientCity: clients.city,
+          clientState: clients.state,
+          clientZipCode: clients.zipCode,
+          clientCountry: clients.country,
+          clientUserEmail: users.email,
+          clientUserFirstName: users.firstName,
+          clientUserLastName: users.lastName,
         })
         .from(invoices)
         .leftJoin(clients, eq(invoices.clientId, clients.id))

@@ -1,8 +1,9 @@
 import { z } from 'zod';
 import { router, protectedProcedure, adminProcedure, tenantProcedure } from '../trpc/trpc.js';
-import { clients, users } from '../db/schema/index.js';
+import { db, clients, users } from '../db/index.js';
 import { eq, and, desc, count, ilike, or } from 'drizzle-orm';
 import { TRPCError } from '@trpc/server';
+import { registerUser } from '../lib/auth.js';
 
 export const clientsRouter = router({
   getAll: tenantProcedure
@@ -14,7 +15,7 @@ export const clientsRouter = router({
     .query(async ({ input, ctx }) => {
       const { limit, offset, search } = input;
 
-      let whereConditions = [eq(clients.tenantId, ctx.tenantId)];
+      let whereConditions = [eq(clients.tenantId, ctx.tenantId!)];
 
       if (search) {
         whereConditions.push(
@@ -27,7 +28,7 @@ export const clientsRouter = router({
         );
       }
 
-      const allClients = await ctx.db
+      const allClients = await db
         .select({
           id: clients.id,
           companyName: clients.companyName,
@@ -54,7 +55,7 @@ export const clientsRouter = router({
         .limit(limit)
         .offset(offset);
 
-      const [totalResult] = await ctx.db
+      const [totalResult] = await db
         .select({ count: count() })
         .from(clients)
         .leftJoin(users, eq(clients.userId, users.id))
@@ -72,7 +73,7 @@ export const clientsRouter = router({
       id: z.string().uuid(),
     }))
     .query(async ({ input, ctx }) => {
-      const [client] = await ctx.db
+      const [client] = await db
         .select({
           id: clients.id,
           companyName: clients.companyName,
@@ -97,7 +98,7 @@ export const clientsRouter = router({
         .leftJoin(users, eq(clients.userId, users.id))
         .where(and(
           eq(clients.id, input.id),
-          eq(clients.tenantId, ctx.tenantId)
+          eq(clients.tenantId, ctx.tenantId!)
         ))
         .limit(1);
 
@@ -127,52 +128,52 @@ export const clientsRouter = router({
     .mutation(async ({ input, ctx }) => {
       const { email, firstName, lastName, ...clientData } = input;
 
-      // Create user in Supabase Auth
-      const { data: authData, error: authError } = await ctx.supabase.auth.admin.createUser({
-        email,
-        password: Math.random().toString(36).slice(-8), // Temporary password
-        email_confirm: true,
-      });
+      try {
+        // Generate a temporary password for the client
+        const tempPassword = Math.random().toString(36).slice(-8) + 'Temp123!';
 
-      if (authError || !authData.user) {
-        throw new TRPCError({
-          code: 'INTERNAL_SERVER_ERROR',
-          message: 'Failed to create user account',
-        });
-      }
-
-      // Create user in our database
-      const [newUser] = await ctx.db
-        .insert(users)
-        .values({
-          authUserId: authData.user.id,
+        // Create user using our custom auth system
+        const newUser = await registerUser({
           email,
+          password: tempPassword,
           firstName,
           lastName,
           role: 'CLIENT',
-          tenantId: ctx.tenantId,
-        })
-        .returning();
+          tenantId: ctx.tenantId!,
+        });
 
-      // Create client
-      const [newClient] = await ctx.db
-        .insert(clients)
-        .values({
-          ...clientData,
-          userId: newUser.id,
-          tenantId: ctx.tenantId,
-        })
-        .returning();
+        // Create client profile
+        const [newClient] = await db
+          .insert(clients)
+          .values({
+            ...clientData,
+            userId: newUser.id,
+            tenantId: ctx.tenantId!,
+          })
+          .returning();
 
-      return {
-        ...newClient,
-        user: {
-          id: newUser.id,
-          email: newUser.email,
-          firstName: newUser.firstName,
-          lastName: newUser.lastName,
-        },
-      };
+        return {
+          ...newClient,
+          user: {
+            id: newUser.id,
+            email: newUser.email,
+            firstName: newUser.firstName,
+            lastName: newUser.lastName,
+          },
+          tempPassword, // Return this so admin can share with client
+        };
+      } catch (error: any) {
+        if (error.code === '23505') { // Unique constraint violation
+          throw new TRPCError({
+            code: 'CONFLICT',
+            message: 'Email already exists',
+          });
+        }
+        throw new TRPCError({
+          code: 'INTERNAL_SERVER_ERROR',
+          message: 'Failed to create client',
+        });
+      }
     }),
 
   update: adminProcedure
@@ -190,7 +191,7 @@ export const clientsRouter = router({
     .mutation(async ({ input, ctx }) => {
       const { id, ...updateData } = input;
 
-      const [updatedClient] = await ctx.db
+      const [updatedClient] = await db
         .update(clients)
         .set({
           ...updateData,
@@ -198,7 +199,7 @@ export const clientsRouter = router({
         })
         .where(and(
           eq(clients.id, id),
-          eq(clients.tenantId, ctx.tenantId)
+          eq(clients.tenantId, ctx.tenantId!)
         ))
         .returning();
 
@@ -210,5 +211,83 @@ export const clientsRouter = router({
       }
 
       return updatedClient;
+    }),
+
+  delete: adminProcedure
+    .input(z.object({
+      id: z.string().uuid(),
+    }))
+    .mutation(async ({ input, ctx }) => {
+      // First check if client exists and belongs to tenant
+      const [existingClient] = await db
+        .select({ id: clients.id, userId: clients.userId })
+        .from(clients)
+        .where(and(
+          eq(clients.id, input.id),
+          eq(clients.tenantId, ctx.tenantId!)
+        ))
+        .limit(1);
+
+      if (!existingClient) {
+        throw new TRPCError({
+          code: 'NOT_FOUND',
+          message: 'Client not found',
+        });
+      }
+
+      // Delete client (this will cascade delete related records)
+      await db
+        .delete(clients)
+        .where(eq(clients.id, input.id));
+
+      // Optionally deactivate the user account instead of deleting
+      if (existingClient.userId) {
+        await db
+          .update(users)
+          .set({ isActive: false })
+          .where(eq(users.id, existingClient.userId));
+      }
+
+      return { success: true };
+    }),
+
+  // Get client statistics
+  getStats: adminProcedure
+    .query(async ({ ctx }) => {
+      const [totalClients] = await db
+        .select({ count: count() })
+        .from(clients)
+        .where(eq(clients.tenantId, ctx.tenantId!));
+
+      const [activeClients] = await db
+        .select({ count: count() })
+        .from(clients)
+        .where(and(
+          eq(clients.tenantId, ctx.tenantId!),
+          eq(clients.status, 'ACTIVE')
+        ));
+
+      const [inactiveClients] = await db
+        .select({ count: count() })
+        .from(clients)
+        .where(and(
+          eq(clients.tenantId, ctx.tenantId!),
+          eq(clients.status, 'INACTIVE')
+        ));
+
+      const [suspendedClients] = await db
+        .select({ count: count() })
+        .from(clients)
+        .where(and(
+          eq(clients.tenantId, ctx.tenantId!),
+          eq(clients.status, 'SUSPENDED')
+        ));
+
+      return {
+        total: totalClients.count,
+        active: activeClients.count,
+        inactive: inactiveClients.count,
+        suspended: suspendedClients.count,
+      };
     }),
 });
