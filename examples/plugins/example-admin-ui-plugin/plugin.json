@@ -1,0 +1,11 @@
+{
+  "name": "example-admin-ui-plugin",
+  "version": "1.0.0",
+  "description": "An example plugin demonstrating admin UI integration with Panel1",
+  "author": "Panel1 Team <team@panel1.dev>",
+  "panel1": ">=0.2.0 <0.3.0",
+  "homepage": "https://github.com/panel1-org/example-admin-ui-plugin",
+  "repository": "https://github.com/panel1-org/example-admin-ui-plugin.git",
+  "license": "MIT",
+  "keywords": ["admin", "ui", "dashboard", "example"]
+}
