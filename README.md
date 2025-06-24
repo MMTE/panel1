@@ -19,8 +19,10 @@ Build a **headless, type-safe, plugin-extensible** platform that puts developers
 - 🧩 **Modular Plugin System** - Extensible architecture with plugin hooks and marketplace
 - 🛡️ **Enterprise Security** - JWT/OAuth authentication, RBAC, and audit trails
 - 💳 **Multi-Gateway Billing** - Stripe, PayPal, and custom payment processors
+- 📄 **Professional Invoice System** - Sequential numbering, PDF generation, automated emails
 - 🌍 **i18n & Localization** - RTL support, multiple currencies, comprehensive localization
 - 🎨 **Modern UI** - React-based admin panel with customizable themes
+- 📊 **Standards Compliant** - International invoice standards, audit trails, regional compliance
 
 ## 🏗️ Architecture
 
@@ -84,25 +86,54 @@ panel1/
 
 5. **Start development servers**
    ```bash
-   # Terminal 1: Backend
-   cd apps/api
+   # From project root
    npm run dev
-
-   # Terminal 2: Frontend
-   cd apps/web
-   npm run dev
+   
+   # Or individually:
+   # Terminal 1: Backend (http://localhost:3001)
+   cd apps/api && npm run dev
+   
+   # Terminal 2: Frontend (http://localhost:5173)
+   cd apps/web && npm run dev
    ```
+
+## 📊 Invoice System Highlights
+
+Panel1 features a **comprehensive invoice lifecycle system** that rivals enterprise billing platforms:
+
+### ✅ Professional Invoice Management
+- **Sequential numbering** with audit compliance (INV-2025-000001)
+- **Multi-tenant isolation** - each tenant maintains separate invoice sequences
+- **PDF generation** with professional layouts and company branding
+- **Automated email notifications** for all invoice lifecycle events
+
+### ✅ Standards Compliance (85% → 95% target)
+- **Database design** - ACID transactions, proper decimal precision
+- **International formats** - Support for US, EU, UK, CA, AU standards
+- **Tax compliance** - Regional tax display and calculation
+- **Audit trails** - Complete invoice history and status tracking
+
+### ✅ Technical Architecture
+- **Event-driven design** - Automated notifications using existing infrastructure
+- **Type-safe APIs** - Full tRPC integration with TypeScript
+- **Atomic operations** - Database transactions ensure data consistency
+- **Scalable design** - Optimized for high-volume invoice processing
+
+**Comparison vs WHMCS**: Panel1 offers superior technical architecture with modern development practices while maintaining feature parity in billing capabilities.
 
 ## 📋 Roadmap
 
 ### 🎯 MVP (v0.1.x) - Core Foundation
 - [x] Project structure and monorepo setup
-- [ ] Authentication & user management
-- [ ] Billing core (invoices, subscriptions, plans)
-- [ ] Stripe integration
-- [ ] Admin panel interface
-- [ ] Client management
-- [ ] API framework with tRPC
+- [x] Authentication & user management
+- [x] **Professional Invoice System** - Sequential numbering, PDF generation, email notifications
+- [x] **Standards Compliance** - International invoice standards, audit trails, regional support
+- [x] Multi-tenant architecture with tenant isolation
+- [x] Event-driven invoice lifecycle management
+- [x] Stripe integration foundation
+- [x] Admin panel interface
+- [x] Client management
+- [x] API framework with tRPC
 
 ### 🚀 Enhanced Features (v0.2.x - v0.5.x)
 - [ ] Provisioning engine (cPanel, Docker, custom)
@@ -119,6 +150,12 @@ panel1/
 - [ ] Theming engine
 - [ ] CLI tooling
 - [ ] Complete documentation
+
+## 📋 Documentation
+
+- **[Standards Compliance Assessment](docs/STANDARDS_COMPLIANCE.md)** - Detailed analysis of invoice system compliance
+- **[Plugin Development Guide](docs/PLUGIN_DEVELOPMENT.md)** - Build custom plugins for Panel1
+- **[API Documentation](docs/API.md)** - Complete API reference (coming soon)
 
 ## 🤝 Contributing
 
