@@ -1,0 +1,27 @@
+{
+  "version": "5",
+  "dialect": "pg",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "5",
+      "when": 1750701736676,
+      "tag": "0000_groovy_firestar",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "5",
+      "when": 1750704171029,
+      "tag": "0001_hesitant_meltdown",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "5",
+      "when": 1750743044022,
+      "tag": "0002_public_peter_parker",
+      "breakpoints": true
+    }
+  ]
+}

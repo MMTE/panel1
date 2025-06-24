@@ -103,12 +103,15 @@ export function useInvoices() {
     { enabled: !isDemoMode }
   );
 
+  const generatePDFMutation = trpc.invoices.generatePDF.useQuery;
+
   return {
     invoices: isDemoMode ? mockInvoices : (invoicesData?.invoices || []),
     totalInvoices: isDemoMode ? mockInvoices.length : (invoicesData?.total || 0),
     stats: isDemoMode ? mockStats : statsData,
     loading: isInvoicesLoading || isStatsLoading,
     error: invoicesError?.message || statsError?.message,
-    refetch: refetchInvoices
+    refetch: refetchInvoices,
+    generatePDF: generatePDFMutation
   };
 }

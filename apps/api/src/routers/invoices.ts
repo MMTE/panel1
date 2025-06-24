@@ -3,6 +3,9 @@ import { router, protectedProcedure, adminProcedure, tenantProcedure } from '../
 import { db, invoices, invoiceItems, clients, users, subscriptions, payments } from '../db/index.js';
 import { eq, and, desc, count, ilike, or, gte, lte } from 'drizzle-orm';
 import { TRPCError } from '@trpc/server';
+import { InvoiceNumberService } from '../lib/invoice/InvoiceNumberService.js';
+import { InvoicePDFService } from '../lib/invoice/InvoicePDFService.js';
+import { InvoiceEventHandler } from '../lib/invoice/InvoiceEventHandler.js';
 
 export const invoicesRouter = router({
   getAll: tenantProcedure
@@ -234,8 +237,8 @@ export const invoicesRouter = router({
       const taxAmount = parseFloat(tax);
       const total = subtotal + taxAmount;
 
-      // Generate invoice number
-      const invoiceNumber = `INV-${new Date().getFullYear()}-${Date.now()}`;
+      // Generate proper invoice number using the service
+      const invoiceNumber = await InvoiceNumberService.generateInvoiceNumber(ctx.tenantId!);
 
       // Create invoice
       const [newInvoice] = await ctx.db
@@ -267,6 +270,14 @@ export const invoicesRouter = router({
         .insert(invoiceItems)
         .values(invoiceItemsData);
 
+      // Trigger email notification for invoice created
+      try {
+        await InvoiceEventHandler.handleInvoiceCreated(newInvoice.id, ctx.tenantId!);
+      } catch (error) {
+        console.error('Failed to send invoice created email:', error);
+        // Don't fail the invoice creation if email fails
+      }
+
       return newInvoice;
     }),
 
@@ -293,7 +304,7 @@ export const invoicesRouter = router({
         .set(updateData)
         .where(and(
           eq(invoices.id, id),
-          eq(invoices.tenantId, ctx.tenantId)
+          ctx.tenantId ? eq(invoices.tenantId, ctx.tenantId) : undefined
         ))
         .returning();
 
@@ -304,6 +315,43 @@ export const invoicesRouter = router({
         });
       }
 
+      // Trigger email notification for status changes
+      try {
+        if (status === 'PAID') {
+          await InvoiceEventHandler.handleInvoicePaid(updatedInvoice.id, ctx.tenantId!);
+        } else if (status === 'OVERDUE') {
+          await InvoiceEventHandler.handleInvoiceOverdue(updatedInvoice.id, ctx.tenantId!);
+        }
+      } catch (error) {
+        console.error('Failed to send invoice status email:', error);
+        // Don't fail the status update if email fails
+      }
+
       return updatedInvoice;
+    }),
+
+  generatePDF: tenantProcedure
+    .input(z.object({
+      id: z.string().uuid(),
+    }))
+    .query(async ({ input, ctx }) => {
+      try {
+        const pdfBuffer = await InvoicePDFService.generatePDF(input.id, ctx.tenantId!);
+        
+        // Convert buffer to base64 for transmission
+        const base64PDF = pdfBuffer.toString('base64');
+        
+        return {
+          pdf: base64PDF,
+          filename: `invoice-${input.id}.pdf`,
+          mimeType: 'application/pdf',
+        };
+      } catch (error) {
+        console.error('PDF generation failed:', error);
+        throw new TRPCError({
+          code: 'INTERNAL_SERVER_ERROR',
+          message: 'Failed to generate PDF',
+        });
+      }
     }),
 });
