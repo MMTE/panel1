@@ -66,6 +66,28 @@ export const tenantsRouter = router({
       return tenant;
     }),
 
+  // Get tenant by ID
+  getById: protectedProcedure
+    .input(z.object({
+      id: z.string().uuid(),
+    }))
+    .query(async ({ input }) => {
+      const [tenant] = await db
+        .select()
+        .from(tenants)
+        .where(eq(tenants.id, input.id))
+        .limit(1);
+
+      if (!tenant) {
+        throw new TRPCError({
+          code: 'NOT_FOUND',
+          message: 'Tenant not found',
+        });
+      }
+
+      return tenant;
+    }),
+
   // Create new tenant (super admin only)
   create: adminProcedure
     .input(z.object({

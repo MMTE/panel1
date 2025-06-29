@@ -1,7 +1,7 @@
 import fs from 'fs-extra';
 import path from 'path';
 import chalk from 'chalk';
-import { build } from 'esbuild';
+import { build, context } from 'esbuild';
 
 interface BuildOptions {
   watch?: boolean;
@@ -60,7 +60,7 @@ export async function buildCommand(options: BuildOptions) {
   if (options.watch) {
     console.log(chalk.yellow('👀 Watching for changes...'));
     
-    const context = await build({
+    const buildContext = await context({
       ...buildConfig,
       plugins: [
         {
@@ -81,11 +81,11 @@ export async function buildCommand(options: BuildOptions) {
       ],
     });
 
-    await context.watch();
+    await buildContext.watch();
     
     // Keep the process running
     process.on('SIGINT', async () => {
-      await context.dispose();
+      await buildContext.dispose();
       process.exit(0);
     });
   } else {

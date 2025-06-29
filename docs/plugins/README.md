@@ -111,7 +111,7 @@ export default createPlugin({
 Every plugin receives a context object with access to:
 
 - Logger for debugging
-- Supabase client for database access
+- Database client for data access
 - Configuration management
 - Translation utilities
 - Event emission

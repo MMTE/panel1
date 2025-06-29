@@ -25,7 +25,7 @@ export async function installCommand(source: string, options: InstallOptions) {
   console.log(chalk.green('✅ Plugin installed successfully!'));
 }
 
-async function installFromGit(gitUrl: string, options: InstallOptions) {
+async function installFromGit(gitUrl: string, _options: InstallOptions) {
   const tempDir = path.join(process.cwd(), '.tmp-plugin');
   
   try {
@@ -65,7 +65,7 @@ async function installFromNpm(packageName: string, options: InstallOptions) {
   execSync(installCmd, { stdio: 'inherit' });
 }
 
-async function installFromLocal(localPath: string, options: InstallOptions) {
+async function installFromLocal(localPath: string, _options: InstallOptions) {
   const sourcePath = path.resolve(localPath);
   
   if (!await fs.pathExists(sourcePath)) {

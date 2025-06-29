@@ -11,9 +11,10 @@ export const clientsRouter = router({
       limit: z.number().min(1).max(100).default(10),
       offset: z.number().min(0).default(0),
       search: z.string().optional(),
+      role: z.enum(['CLIENT', 'RESELLER']).optional(),
     }))
     .query(async ({ input, ctx }) => {
-      const { limit, offset, search } = input;
+      const { limit, offset, search, role } = input;
 
       let whereConditions = [eq(clients.tenantId, ctx.tenantId!)];
 
@@ -26,6 +27,10 @@ export const clientsRouter = router({
             ilike(users.lastName, `%${search}%`)
           )!
         );
+      }
+
+      if (role) {
+        whereConditions.push(eq(users.role, role));
       }
 
       const allClients = await db
@@ -46,6 +51,8 @@ export const clientsRouter = router({
             email: users.email,
             firstName: users.firstName,
             lastName: users.lastName,
+            role: users.role,
+            isActive: users.isActive,
           },
         })
         .from(clients)
@@ -106,6 +113,55 @@ export const clientsRouter = router({
         throw new TRPCError({
           code: 'NOT_FOUND',
           message: 'Client not found',
+        });
+      }
+
+      return client;
+    }),
+
+  // Get current user's client profile
+  getCurrent: protectedProcedure
+    .query(async ({ ctx }) => {
+      if (!ctx.user || ctx.user.role !== 'CLIENT') {
+        throw new TRPCError({
+          code: 'FORBIDDEN',
+          message: 'Only client users can access their client profile',
+        });
+      }
+
+      const [client] = await db
+        .select({
+          id: clients.id,
+          companyName: clients.companyName,
+          address: clients.address,
+          city: clients.city,
+          state: clients.state,
+          zipCode: clients.zipCode,
+          country: clients.country,
+          phone: clients.phone,
+          status: clients.status,
+          createdAt: clients.createdAt,
+          updatedAt: clients.updatedAt,
+          user: {
+            id: users.id,
+            email: users.email,
+            firstName: users.firstName,
+            lastName: users.lastName,
+            isActive: users.isActive,
+          },
+        })
+        .from(clients)
+        .leftJoin(users, eq(clients.userId, users.id))
+        .where(and(
+          eq(clients.userId, ctx.user.id),
+          eq(clients.tenantId, ctx.tenantId!)
+        ))
+        .limit(1);
+
+      if (!client) {
+        throw new TRPCError({
+          code: 'NOT_FOUND',
+          message: 'Client profile not found',
         });
       }
 
@@ -207,6 +263,47 @@ export const clientsRouter = router({
         throw new TRPCError({
           code: 'NOT_FOUND',
           message: 'Client not found',
+        });
+      }
+
+      return updatedClient;
+    }),
+
+  // Update current user's client profile
+  updateCurrent: protectedProcedure
+    .input(z.object({
+      companyName: z.string().optional(),
+      address: z.string().optional(),
+      city: z.string().optional(),
+      state: z.string().optional(),
+      zipCode: z.string().optional(),
+      country: z.string().optional(),
+      phone: z.string().optional(),
+    }))
+    .mutation(async ({ input, ctx }) => {
+      if (!ctx.user || ctx.user.role !== 'CLIENT') {
+        throw new TRPCError({
+          code: 'FORBIDDEN',
+          message: 'Only client users can update their client profile',
+        });
+      }
+
+      const [updatedClient] = await db
+        .update(clients)
+        .set({
+          ...input,
+          updatedAt: new Date(),
+        })
+        .where(and(
+          eq(clients.userId, ctx.user.id),
+          eq(clients.tenantId, ctx.tenantId!)
+        ))
+        .returning();
+
+      if (!updatedClient) {
+        throw new TRPCError({
+          code: 'NOT_FOUND',
+          message: 'Client profile not found',
         });
       }
 

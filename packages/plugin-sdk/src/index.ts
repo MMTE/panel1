@@ -73,8 +73,8 @@ export interface PluginContext {
     error: (...args: any[]) => void;
     debug: (...args: any[]) => void;
   };
-  /** Access to Supabase client for database operations */
-  readonly supabase: any;
+  /** Access to database client for operations */
+  readonly db: any;
   /** Current authenticated user (if any) */
   readonly user?: {
     id: string;
@@ -413,7 +413,7 @@ export function createPluginContext(
       error: console.error,
       debug: console.debug,
     },
-    supabase: null,
+    db: null,
     eventEmitter: {
       emit: async () => {},
     },

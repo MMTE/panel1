@@ -17,12 +17,18 @@ export class InvoiceEmailService {
   private static transporter: nodemailer.Transporter | null = null;
 
   static async initialize(config: EmailConfig): Promise<void> {
-    this.transporter = nodemailer.createTransporter({
+    const transportOptions: any = {
       host: config.host,
       port: config.port,
       secure: config.secure,
-      auth: config.auth,
-    });
+    };
+
+    // Only add auth if user/pass are provided (MailHog doesn't need auth)
+    if (config.auth.user && config.auth.pass) {
+      transportOptions.auth = config.auth;
+    }
+
+    this.transporter = nodemailer.createTransport(transportOptions);
 
     try {
       await this.transporter.verify();

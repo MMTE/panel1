@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { router, protectedProcedure, adminProcedure, tenantProcedure } from '../trpc/trpc.js';
+import { router, publicProcedure, protectedProcedure, adminProcedure, tenantProcedure } from '../trpc/trpc.js';
 import { db, users, clients } from '../db/index.js';
 import { eq, and, desc, count, ilike, or } from 'drizzle-orm';
 import { TRPCError } from '@trpc/server';
@@ -97,7 +97,7 @@ export const usersRouter = router({
       }
 
       // Get client profile if user is a client
-      let clientProfile = null;
+      let clientProfile: any = null;
       if (user.role === 'CLIENT') {
         const [client] = await db
           .select()
@@ -387,5 +387,38 @@ export const usersRouter = router({
         });
 
       return updatedUser;
+    }),
+
+  // Development-only: Get all users for dev bar (no auth required)
+  devGetAll: publicProcedure
+    .query(async () => {
+      // Only allow in development mode
+      if (process.env.NODE_ENV === 'production') {
+        throw new TRPCError({
+          code: 'FORBIDDEN',
+          message: 'Dev endpoints only allowed in development mode',
+        });
+      }
+
+      const allUsers = await db
+        .select({
+          id: users.id,
+          email: users.email,
+          firstName: users.firstName,
+          lastName: users.lastName,
+          role: users.role,
+          isActive: users.isActive,
+          tenantId: users.tenantId,
+          createdAt: users.createdAt,
+        })
+        .from(users)
+        .where(eq(users.isActive, true))
+        .orderBy(desc(users.createdAt))
+        .limit(50);
+
+      return {
+        users: allUsers,
+        total: allUsers.length,
+      };
     }),
 });

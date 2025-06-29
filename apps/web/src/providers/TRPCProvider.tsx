@@ -1,9 +1,9 @@
-import React, { ReactNode } from 'react';
+import React from 'react';
 import { QueryClientProvider } from '@tanstack/react-query';
 import { trpc, trpcClient, queryClient } from '../api/trpc';
 
 interface TRPCProviderProps {
-  children: ReactNode;
+  children: React.ReactNode;
 }
 
 export function TRPCProvider({ children }: TRPCProviderProps) {
@@ -14,4 +14,4 @@ export function TRPCProvider({ children }: TRPCProviderProps) {
       </QueryClientProvider>
     </trpc.Provider>
   );
-}
+} 

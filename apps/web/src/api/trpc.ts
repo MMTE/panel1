@@ -1,6 +1,6 @@
 import { createTRPCReact, httpBatchLink, loggerLink } from '@trpc/react-query';
 import { inferRouterOutputs, inferRouterInputs } from '@trpc/server';
-import type { AppRouter } from '../../../apps/api/src/routers/index.js';
+import type { AppRouter } from '../../../api/src/routers/index.js';
 import { QueryClient } from '@tanstack/react-query';
 
 export const trpc = createTRPCReact<AppRouter>();
@@ -24,16 +24,16 @@ export const trpcClient = trpc.createClient({
   links: [
     loggerLink({
       enabled: (opts) => 
-        process.env.NODE_ENV === 'development' || 
+        import.meta.env.DEV || 
         (opts.direction === 'down' && opts.result instanceof Error),
     }),
     httpBatchLink({
       url: `${import.meta.env.VITE_API_URL || 'http://localhost:3001'}/trpc`,
       async headers() {
         const token = getAuthToken();
-        
         return {
           Authorization: token ? `Bearer ${token}` : '',
+          'Content-Type': 'application/json',
         };
       },
     }),

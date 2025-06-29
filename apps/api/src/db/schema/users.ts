@@ -1,8 +1,8 @@
 import { pgTable, uuid, text, boolean, timestamp, pgEnum } from 'drizzle-orm/pg-core';
 import { relations } from 'drizzle-orm';
-import { tenants } from './tenants.js';
-import { clients } from './clients.js';
-import { invoices } from './invoices.js';
+import { tenants } from './tenants';
+import { clients } from './clients';
+import { invoices } from './invoices';
 
 export const userRoleEnum = pgEnum('user_role', ['ADMIN', 'CLIENT', 'RESELLER']);
 

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   Package, 
   Search, 
@@ -19,160 +19,43 @@ import {
 import { PluginSlot } from '../../lib/plugins';
 import { useAuth } from '../../hooks/useAuth';
 import { usePlans } from '../../hooks/usePlans';
-import { trpc } from '../../api/trpc';
 
 export function AdminPlans() {
-  const { user, isDemoMode } = useAuth();
-  const { plans, loading: plansLoading } = usePlans();
+  const { user } = useAuth();
+  const { plans, loading: plansLoading, error, refetch } = usePlans();
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedInterval, setSelectedInterval] = useState('all');
   const [selectedStatus, setSelectedStatus] = useState('all');
 
-  // Enhanced mock plans data for demo
-  const mockPlans = [
-    {
-      id: '1',
-      name: 'Starter',
-      description: 'Perfect for small websites and personal projects',
-      price: 9.99,
-      currency: 'USD',
-      interval: 'MONTHLY',
-      is_active: true,
-      trial_period_days: 14,
-      setup_fee: 0,
-      features: {
-        storage: '10GB SSD Storage',
-        bandwidth: '100GB Bandwidth',
-        domains: '1 Domain',
-        email: '5 Email Accounts',
-        support: 'Email Support'
-      },
-      created_at: '2024-01-01T00:00:00Z',
-      subscribers: 45,
-      revenue: 4495.50
-    },
-    {
-      id: '2',
-      name: 'Professional',
-      description: 'Ideal for growing businesses and e-commerce sites',
-      price: 19.99,
-      currency: 'USD',
-      interval: 'MONTHLY',
-      is_active: true,
-      trial_period_days: 14,
-      setup_fee: 0,
-      features: {
-        storage: '50GB SSD Storage',
-        bandwidth: '500GB Bandwidth',
-        domains: '10 Domains',
-        email: '25 Email Accounts',
-        support: 'Priority Support',
-        ssl: 'Free SSL Certificate',
-        backup: 'Daily Backups'
-      },
-      created_at: '2024-01-01T00:00:00Z',
-      subscribers: 128,
-      revenue: 25587.20
-    },
-    {
-      id: '3',
-      name: 'Enterprise',
-      description: 'For high-traffic websites and mission-critical applications',
-      price: 49.99,
-      currency: 'USD',
-      interval: 'MONTHLY',
-      is_active: true,
-      trial_period_days: 30,
-      setup_fee: 99.99,
-      features: {
-        storage: '200GB SSD Storage',
-        bandwidth: 'Unlimited Bandwidth',
-        domains: 'Unlimited Domains',
-        email: 'Unlimited Email Accounts',
-        support: '24/7 Phone Support',
-        ssl: 'Wildcard SSL Certificate',
-        backup: 'Hourly Backups',
-        cdn: 'Global CDN',
-        monitoring: 'Advanced Monitoring'
-      },
-      created_at: '2024-01-01T00:00:00Z',
-      subscribers: 67,
-      revenue: 33493.30
-    },
-    {
-      id: '4',
-      name: 'Professional Annual',
-      description: 'Professional plan with annual billing discount',
-      price: 199.99,
-      currency: 'USD',
-      interval: 'YEARLY',
-      is_active: true,
-      trial_period_days: 14,
-      setup_fee: 0,
-      features: {
-        storage: '50GB SSD Storage',
-        bandwidth: '500GB Bandwidth',
-        domains: '10 Domains',
-        email: '25 Email Accounts',
-        support: 'Priority Support',
-        ssl: 'Free SSL Certificate',
-        backup: 'Daily Backups',
-        discount: '2 months free'
-      },
-      created_at: '2024-01-01T00:00:00Z',
-      subscribers: 89,
-      revenue: 17799.11
-    },
-    {
-      id: '5',
-      name: 'Legacy Basic',
-      description: 'Discontinued basic plan',
-      price: 5.99,
-      currency: 'USD',
-      interval: 'MONTHLY',
-      is_active: false,
-      trial_period_days: 0,
-      setup_fee: 0,
-      features: {
-        storage: '5GB Storage',
-        bandwidth: '50GB Bandwidth',
-        domains: '1 Domain',
-        email: '3 Email Accounts',
-        support: 'Email Support'
-      },
-      created_at: '2023-06-01T00:00:00Z',
-      subscribers: 12,
-      revenue: 71.88
-    }
-  ];
+  // Add loading and error states
+  if (plansLoading) {
+    return (
+      <div className="flex items-center justify-center h-64">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-purple-600 mx-auto mb-4"></div>
+          <p className="text-gray-600">Loading plans...</p>
+        </div>
+      </div>
+    );
+  }
 
-  // Create plan mutation
-  const createPlan = trpc.plans.create.useMutation({
-    onSuccess: () => {
-      // Refetch plans after creating a new one
-      utils.plans.getAll.invalidate();
-    }
-  });
-
-  // Update plan mutation
-  const updatePlan = trpc.plans.update.useMutation({
-    onSuccess: () => {
-      // Refetch plans after updating
-      utils.plans.getAll.invalidate();
-    }
-  });
-
-  // Delete plan mutation
-  const deletePlan = trpc.plans.delete.useMutation({
-    onSuccess: () => {
-      // Refetch plans after deleting
-      utils.plans.getAll.invalidate();
-    }
-  });
-
-  const utils = trpc.useContext();
-
-  const displayPlans = isDemoMode ? mockPlans : plans;
+  if (error) {
+    return (
+      <div className="flex items-center justify-center h-64">
+        <div className="text-center">
+          <AlertCircle className="w-12 h-12 text-red-500 mx-auto mb-4" />
+          <h3 className="text-lg font-semibold text-gray-900 mb-2">Error Loading Plans</h3>
+          <p className="text-gray-600 mb-4">{error}</p>
+          <button 
+            onClick={() => refetch()}
+            className="bg-purple-600 text-white px-4 py-2 rounded-lg hover:bg-purple-700 transition-colors"
+          >
+            Retry
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   const formatCurrency = (amount: number, currency: string = 'USD') => {
     return new Intl.NumberFormat('en-US', {
@@ -204,31 +87,23 @@ export function AdminPlans() {
     }
   };
 
-  const filteredPlans = displayPlans.filter(plan => {
+  const filteredPlans = plans.filter(plan => {
     const matchesSearch = 
       plan.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      (plan.description && plan.description.toLowerCase().includes(searchTerm.toLowerCase()));
+      plan.description?.toLowerCase().includes(searchTerm.toLowerCase());
     
     const matchesInterval = selectedInterval === 'all' || plan.interval === selectedInterval;
     const matchesStatus = selectedStatus === 'all' || 
-      (selectedStatus === 'active' && plan.is_active) ||
-      (selectedStatus === 'inactive' && !plan.is_active);
+      (selectedStatus === 'active' && plan.isActive) ||
+      (selectedStatus === 'inactive' && !plan.isActive);
     
     return matchesSearch && matchesInterval && matchesStatus;
   });
 
-  const totalPlans = displayPlans.length;
-  const activePlans = displayPlans.filter(p => p.is_active).length;
-  const totalSubscribers = displayPlans.reduce((sum, p) => sum + (p.subscribers || 0), 0);
-  const totalRevenue = displayPlans.reduce((sum, p) => sum + (p.revenue || 0), 0);
-
-  if (plansLoading && !isDemoMode) {
-    return (
-      <div className="flex items-center justify-center h-64">
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-purple-500"></div>
-      </div>
-    );
-  }
+  const totalPlans = plans.length;
+  const activePlans = plans.filter(p => p.isActive).length;
+  const totalSubscribers = 0; // Will be calculated from subscriptions later
+  const totalRevenue = 0; // Will be calculated from payments later
 
   return (
     <div className="space-y-6">
@@ -244,7 +119,7 @@ export function AdminPlans() {
         <div className="flex items-center space-x-3">
           <PluginSlot 
             slotId="admin.page.plans.header.actions" 
-            props={{ user, isDemoMode, plans: filteredPlans }}
+            props={{ user, plans: filteredPlans }}
             className="flex items-center space-x-2"
           />
           
@@ -352,7 +227,7 @@ export function AdminPlans() {
 
           <PluginSlot 
             slotId="admin.page.plans.list.actions" 
-            props={{ user, isDemoMode, plans: filteredPlans, searchTerm, selectedInterval, selectedStatus }}
+            props={{ user, plans: filteredPlans, searchTerm, selectedInterval, selectedStatus }}
             className="flex items-center space-x-2"
           />
         </div>
@@ -362,7 +237,7 @@ export function AdminPlans() {
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
         {filteredPlans.map((plan) => (
           <div key={plan.id} className={`bg-white rounded-xl shadow-sm border-2 transition-all duration-200 hover:shadow-md ${
-            plan.is_active ? 'border-gray-200 hover:border-purple-300' : 'border-gray-100 opacity-75'
+            plan.isActive ? 'border-gray-200 hover:border-purple-300' : 'border-gray-100 opacity-75'
           }`}>
             {/* Plan Header */}
             <div className="p-6 border-b border-gray-200">
@@ -372,15 +247,15 @@ export function AdminPlans() {
                   <p className="text-gray-600 text-sm mt-1">{plan.description}</p>
                 </div>
                 <div className="flex items-center space-x-2">
-                  {plan.is_active ? (
+                  {plan.isActive ? (
                     <CheckCircle className="w-5 h-5 text-green-500" />
                   ) : (
                     <XCircle className="w-5 h-5 text-gray-400" />
                   )}
                   <span className={`px-2 py-1 rounded-full text-xs font-medium ${
-                    plan.is_active ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-800'
+                    plan.isActive ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-800'
                   }`}>
-                    {plan.is_active ? 'Active' : 'Inactive'}
+                    {plan.isActive ? 'Active' : 'Inactive'}
                   </span>
                 </div>
               </div>
@@ -388,18 +263,18 @@ export function AdminPlans() {
               {/* Pricing */}
               <div className="flex items-baseline space-x-2">
                 <span className="text-3xl font-bold text-gray-900">
-                  {formatCurrency(plan.price, plan.currency)}
+                  {formatCurrency(parseFloat(plan.price), plan.currency)}
                 </span>
                 <span className="text-gray-500">/ {getIntervalLabel(plan.interval)}</span>
               </div>
 
               {/* Setup Fee & Trial */}
               <div className="flex items-center space-x-4 mt-2 text-sm text-gray-600">
-                {plan.setup_fee > 0 && (
-                  <span>Setup: {formatCurrency(plan.setup_fee)}</span>
+                {parseFloat(plan.setupFee || '0') > 0 && (
+                  <span>Setup: {formatCurrency(parseFloat(plan.setupFee || '0'))}</span>
                 )}
-                {plan.trial_period_days > 0 && (
-                  <span>{plan.trial_period_days}-day trial</span>
+                {(plan.trialPeriodDays || 0) > 0 && (
+                  <span>{plan.trialPeriodDays}-day trial</span>
                 )}
               </div>
             </div>
@@ -421,11 +296,11 @@ export function AdminPlans() {
             <div className="p-6 border-b border-gray-200">
               <div className="grid grid-cols-2 gap-4">
                 <div className="text-center">
-                  <div className="text-2xl font-bold text-gray-900">{plan.subscribers || 0}</div>
+                  <div className="text-2xl font-bold text-gray-900">0</div>
                   <div className="text-xs text-gray-500">Subscribers</div>
                 </div>
                 <div className="text-center">
-                  <div className="text-2xl font-bold text-gray-900">{formatCurrency(plan.revenue || 0)}</div>
+                  <div className="text-2xl font-bold text-gray-900">{formatCurrency(0)}</div>
                   <div className="text-xs text-gray-500">Revenue</div>
                 </div>
               </div>
@@ -438,15 +313,7 @@ export function AdminPlans() {
                   <Eye className="w-3 h-3 mr-1" />
                   View
                 </button>
-                <button 
-                  className="flex-1 flex items-center justify-center px-3 py-2 bg-blue-100 text-blue-700 rounded-lg hover:bg-blue-200 transition-colors text-sm"
-                  onClick={() => {
-                    if (!isDemoMode) {
-                      // In a real implementation, this would open an edit modal
-                      console.log('Edit plan:', plan.id);
-                    }
-                  }}
-                >
+                <button className="flex-1 flex items-center justify-center px-3 py-2 bg-blue-100 text-blue-700 rounded-lg hover:bg-blue-200 transition-colors text-sm">
                   <Edit className="w-3 h-3 mr-1" />
                   Edit
                 </button>
@@ -482,7 +349,7 @@ export function AdminPlans() {
       {/* Plugin Slot: Page Bottom */}
       <PluginSlot 
         slotId="admin.page.plans.bottom" 
-        props={{ user, isDemoMode, plans: filteredPlans }}
+        props={{ user, plans: filteredPlans }}
         className="space-y-6"
       />
     </div>

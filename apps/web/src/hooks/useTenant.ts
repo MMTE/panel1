@@ -6,98 +6,85 @@ import { trpc } from '../api/trpc';
 export function useTenant() {
   const [tenant, setTenant] = useState<Tenant | null>(null);
   const [loading, setLoading] = useState(true);
-  const { user, isDemoMode } = useAuth();
-  
-  const { data: tenantData, isLoading: isTenantLoading } = trpc.tenants.getCurrent.useQuery(undefined, {
-    enabled: !!user && !isDemoMode,
-    onSuccess: (data) => {
-      if (data) {
-        tenantManager.setCurrentTenant(data);
-        setTenant(data);
-      }
-      setLoading(false);
-    },
-    onError: () => {
-      setLoading(false);
-    }
+  const { user } = useAuth();
+
+  // Get current tenant using tRPC
+  const { data: currentTenant, isLoading: isLoadingTenant } = trpc.tenants.getCurrent.useQuery(undefined, {
+    enabled: !!user, // Only run if user is logged in
+    retry: false,
   });
 
   useEffect(() => {
-    if (isDemoMode) {
-      // For demo mode, use default tenant
-      const defaultTenant: Tenant = {
-        id: '00000000-0000-0000-0000-000000000000',
-        name: 'Demo Tenant',
-        slug: 'demo',
-        settings: {
+    if (isLoadingTenant) {
+      setLoading(true);
+      return;
+    }
+
+    if (currentTenant) {
+      // Transform the tRPC tenant data to match our Tenant interface
+      const transformedTenant: Tenant = {
+        id: currentTenant.id,
+        name: currentTenant.name,
+        slug: currentTenant.slug,
+        domain: currentTenant.domain || undefined,
+        settings: currentTenant.settings || {
           features: {
             plugins: true,
             multi_currency: true,
-            custom_branding: true
-          }
+            custom_branding: true,
+          },
+          limits: {
+            max_users: 1000,
+            max_clients: 10000,
+            max_storage: 100000,
+          },
         },
-        branding: {
-          primary_color: '#7c3aed',
-          company_name: 'Panel1 Demo'
+        branding: currentTenant.branding || {
+          primary_color: '#8B5CF6',
+          secondary_color: '#EC4899',
+          logo_url: '/logo.png',
+          company_name: 'Panel1 Demo',
+          favicon_url: '/favicon.ico',
+          custom_css: '',
         },
-        isActive: true,
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString()
+        is_active: currentTenant.isActive,
+        created_at: typeof currentTenant.createdAt === 'string' ? currentTenant.createdAt : currentTenant.createdAt.toISOString(),
+        updated_at: typeof currentTenant.updatedAt === 'string' ? currentTenant.updatedAt : currentTenant.updatedAt.toISOString(),
       };
-      
-      tenantManager.setCurrentTenant(defaultTenant);
+
+      tenantManager.setCurrentTenant(transformedTenant);
+      setTenant(transformedTenant);
+      setLoading(false);
+    } else if (!user) {
+      // No user, use default tenant for demo/fallback
+      const defaultTenant = tenantManager.getCurrentTenant();
       setTenant(defaultTenant);
       setLoading(false);
+    } else {
+      // User exists but no tenant found - this shouldn't happen in normal flow
+      console.warn('User exists but no tenant found');
+      setLoading(false);
     }
-  }, [isDemoMode]);
+  }, [currentTenant, isLoadingTenant, user]);
 
   const switchTenant = async (tenantId: string) => {
-    if (isDemoMode) {
-      console.log('🎭 Demo mode: Tenant switch simulated');
-      return;
-    }
-    
     try {
-      setLoading(true);
-      const { data } = await trpc.client.tenants.getById.query({ id: tenantId });
-      
-      if (data) {
-        tenantManager.setCurrentTenant(data);
-        setTenant(data);
-      }
+      // For now, just get the current tenant as switching isn't fully implemented
+      // In a real multi-tenant scenario, this would involve switching context
+      console.log('TODO: Implement tenant switching for:', tenantId);
     } catch (error) {
       console.error('Error switching tenant:', error);
-    } finally {
-      setLoading(false);
     }
   };
 
   const updateTenantBranding = async (branding: Partial<Tenant['branding']>) => {
     if (!tenant) return;
 
-    if (isDemoMode) {
-      console.log('🎭 Demo mode: Tenant branding update simulated', branding);
-      const updatedTenant = {
-        ...tenant,
-        branding: {
-          ...tenant.branding,
-          ...branding
-        }
-      };
-      tenantManager.setCurrentTenant(updatedTenant);
-      setTenant(updatedTenant);
-      return;
-    }
-
     try {
-      const result = await trpc.client.tenants.update.mutate({
-        id: tenant.id,
-        branding,
-      });
-      
-      if (result) {
-        tenantManager.setCurrentTenant(result);
-        setTenant(result);
+      const updatedTenant = await tenantManager.updateTenant(tenant.id, { branding });
+      if (updatedTenant) {
+        setTenant(updatedTenant);
+        tenantManager.setCurrentTenant(updatedTenant);
       }
     } catch (error) {
       console.error('Error updating tenant branding:', error);
@@ -114,7 +101,7 @@ export function useTenant() {
 
   return {
     tenant,
-    loading: loading || isTenantLoading,
+    loading,
     switchTenant,
     updateTenantBranding,
     hasFeature,

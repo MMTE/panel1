@@ -9,6 +9,9 @@ import {
   getUserById,
   type AuthUser 
 } from '../lib/auth.js';
+import { db } from '../db/index.js';
+import { eq } from 'drizzle-orm';
+import { tenants, users } from '../db/schema/index.js';
 
 export const authRouter = router({
   // Login endpoint
@@ -161,6 +164,64 @@ export const authRouter = router({
       return {
         user,
         token: newToken,
+      };
+    }),
+
+  // Development-only: Impersonate user by ID
+  devImpersonate: publicProcedure
+    .input(z.object({
+      userId: z.string().uuid(),
+    }))
+    .mutation(async ({ input }) => {
+      // Only allow in development mode
+      if (process.env.NODE_ENV === 'production') {
+        throw new TRPCError({
+          code: 'FORBIDDEN',
+          message: 'Impersonation only allowed in development mode',
+        });
+      }
+
+      const user = await getUserById(input.userId);
+      
+      if (!user) {
+        throw new TRPCError({
+          code: 'NOT_FOUND',
+          message: 'User not found',
+        });
+      }
+
+      // Create development tenant if it doesn't exist
+      if (!user.tenantId) {
+        const [devTenant] = await db.insert(tenants)
+          .values({
+            name: 'Development Tenant',
+            slug: 'dev',
+            domain: 'localhost',
+            settings: {},
+            branding: {},
+          })
+          .onConflictDoUpdate({
+            target: tenants.slug,
+            set: {
+              updatedAt: new Date(),
+            },
+          })
+          .returning();
+
+        // Update user with tenant ID
+        await db.update(users)
+          .set({ tenantId: devTenant.id })
+          .where(eq(users.id, user.id));
+
+        user.tenantId = devTenant.id;
+      }
+
+      // Create session for impersonated user
+      const token = await createSession(user.id);
+
+      return {
+        user,
+        token,
       };
     }),
 });

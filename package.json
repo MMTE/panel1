@@ -6,19 +6,19 @@
   "type": "module",
   "workspaces": [
     "apps/*",
-    "packages/*"
+    "packages/*",
+    "plugins/*"
   ],
   "scripts": {
-    "dev": "concurrently \"npm:dev:api\" \"npm:dev:web\"",
-    "dev:api": "npm run dev --workspace=@panel1/api",
-    "dev:web": "vite",
-    "build": "npm run build --workspaces",
-    "preview": "vite preview",
-    "lint": "eslint . --ext ts,tsx --report-unused-disable-directives --max-warnings 0",
-    "test": "vitest",
-    "db:generate": "npm run db:generate --workspace=@panel1/api",
-    "db:migrate": "npm run db:migrate --workspace=@panel1/api",
-    "db:studio": "npm run db:studio --workspace=@panel1/api"
+    "dev": "turbo run dev --parallel",
+    "dev:api": "turbo run dev --filter=@panel1/api",
+    "dev:web": "turbo run dev --filter=@panel1/web",
+    "build": "turbo run build",
+    "lint": "turbo run lint",
+    "test": "turbo run test",
+    "db:generate": "turbo run db:generate --filter=@panel1/api",
+    "db:migrate": "turbo run db:migrate --filter=@panel1/api",
+    "db:studio": "turbo run db:studio --filter=@panel1/api"
   },
   "keywords": [
     "billing",
@@ -41,14 +41,17 @@
   },
   "homepage": "https://panel1.dev",
   "dependencies": {
-    "@trpc/client": "^10.45.0",
-    "@trpc/server": "^10.45.0",
-    "@trpc/react-query": "^10.45.0",
+    "@cpanel/api": "^6.0.0",
     "@tanstack/react-query": "^4.36.1",
+    "@trpc/client": "^10.45.0",
+    "@trpc/react-query": "^10.45.0",
+    "@trpc/server": "^10.45.0",
+    "drizzle-kit": "^0.19.13",
+    "drizzle-orm": "^0.28.6",
+    "lucide-react": "^0.344.0",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
     "react-router-dom": "^6.20.1",
-    "lucide-react": "^0.344.0",
     "zod": "^3.22.4"
   },
   "devDependencies": {
@@ -63,13 +66,14 @@
     "eslint-plugin-react-refresh": "^0.4.5",
     "postcss": "^8.4.32",
     "tailwindcss": "^3.3.6",
+    "turbo": "^2.5.4",
     "typescript": "^5.5.3",
     "vite": "^5.0.8",
-    "vitest": "^1.1.0",
-    "concurrently": "^8.2.2"
+    "vitest": "^1.1.0"
   },
   "engines": {
     "node": ">=18.0.0",
     "npm": ">=8.0.0"
-  }
+  },
+  "packageManager": "npm@10.0.0"
 }

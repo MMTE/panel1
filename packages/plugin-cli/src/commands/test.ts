@@ -73,7 +73,7 @@ vi.mock('@panel1/plugin-sdk', () => ({
       error: vi.fn(),
       debug: vi.fn(),
     },
-    supabase: null,
+    db: null,
     eventEmitter: {
       emit: vi.fn(),
     },

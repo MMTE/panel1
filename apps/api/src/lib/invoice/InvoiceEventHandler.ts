@@ -2,17 +2,17 @@ import { InvoiceEmailService, EmailConfig } from './InvoiceEmailService.js';
 import { db, invoices, clients, users, tenants } from '../../db/index.js';
 import { eq, and } from 'drizzle-orm';
 
-// Demo email configuration - in production this would come from tenant settings
-const DEMO_EMAIL_CONFIG: EmailConfig = {
-  host: 'smtp.gmail.com',
-  port: 587,
-  secure: false,
+// MailHog email configuration for development/testing
+const getEmailConfig = (): EmailConfig => ({
+  host: process.env.SMTP_HOST || 'localhost',
+  port: parseInt(process.env.SMTP_PORT || '1025'),
+  secure: process.env.SMTP_SECURE === 'true',
   auth: {
-    user: process.env.SMTP_USER || 'demo@panel1.dev',
-    pass: process.env.SMTP_PASS || 'demo-password',
+    user: process.env.SMTP_USER || 'test@panel1.dev',
+    pass: process.env.SMTP_PASS || '', // MailHog doesn't require authentication
   },
-  from: 'Panel1 <noreply@panel1.dev>',
-};
+  from: process.env.SMTP_FROM || 'Panel1 <noreply@panel1.dev>',
+});
 
 export class InvoiceEventHandler {
   /**
@@ -28,13 +28,13 @@ export class InvoiceEventHandler {
         return;
       }
 
-      // In demo mode, just log instead of sending email
-      if (process.env.NODE_ENV !== 'production') {
-        console.log(`🎭 Demo mode: Would send "created" email for invoice ${invoiceData.invoiceNumber} to ${invoiceData.client.user.email}`);
-        return;
+      // Send email if enabled
+      if (process.env.ENABLE_EMAIL_SENDING === 'true') {
+        await InvoiceEmailService.sendInvoiceEmail(invoiceData, 'created', getEmailConfig());
+        console.log(`📧 Invoice created email sent for ${invoiceData.invoiceNumber} to ${invoiceData.client.user.email}`);
+      } else {
+        console.log(`🎭 Email disabled: Would send "created" email for invoice ${invoiceData.invoiceNumber} to ${invoiceData.client.user.email}`);
       }
-
-      await InvoiceEmailService.sendInvoiceEmail(invoiceData, 'created', DEMO_EMAIL_CONFIG);
     } catch (error) {
       console.error('Failed to send invoice created email:', error);
     }
@@ -53,13 +53,13 @@ export class InvoiceEventHandler {
         return;
       }
 
-      // In demo mode, just log instead of sending email
-      if (process.env.NODE_ENV !== 'production') {
-        console.log(`🎭 Demo mode: Would send "paid" email for invoice ${invoiceData.invoiceNumber} to ${invoiceData.client.user.email}`);
-        return;
+      // Send email if enabled
+      if (process.env.ENABLE_EMAIL_SENDING === 'true') {
+        await InvoiceEmailService.sendInvoiceEmail(invoiceData, 'paid', getEmailConfig());
+        console.log(`📧 Invoice paid email sent for ${invoiceData.invoiceNumber} to ${invoiceData.client.user.email}`);
+      } else {
+        console.log(`🎭 Email disabled: Would send "paid" email for invoice ${invoiceData.invoiceNumber} to ${invoiceData.client.user.email}`);
       }
-
-      await InvoiceEmailService.sendInvoiceEmail(invoiceData, 'paid', DEMO_EMAIL_CONFIG);
     } catch (error) {
       console.error('Failed to send invoice paid email:', error);
     }
@@ -78,13 +78,13 @@ export class InvoiceEventHandler {
         return;
       }
 
-      // In demo mode, just log instead of sending email
-      if (process.env.NODE_ENV !== 'production') {
-        console.log(`🎭 Demo mode: Would send "overdue" email for invoice ${invoiceData.invoiceNumber} to ${invoiceData.client.user.email}`);
-        return;
+      // Send email if enabled
+      if (process.env.ENABLE_EMAIL_SENDING === 'true') {
+        await InvoiceEmailService.sendInvoiceEmail(invoiceData, 'overdue', getEmailConfig());
+        console.log(`📧 Invoice overdue email sent for ${invoiceData.invoiceNumber} to ${invoiceData.client.user.email}`);
+      } else {
+        console.log(`🎭 Email disabled: Would send "overdue" email for invoice ${invoiceData.invoiceNumber} to ${invoiceData.client.user.email}`);
       }
-
-      await InvoiceEmailService.sendInvoiceEmail(invoiceData, 'overdue', DEMO_EMAIL_CONFIG);
     } catch (error) {
       console.error('Failed to send invoice overdue email:', error);
     }

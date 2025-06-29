@@ -354,4 +354,339 @@ export const invoicesRouter = router({
         });
       }
     }),
+
+  // Get invoices for current client user
+  getByClient: protectedProcedure
+    .input(z.object({
+      limit: z.number().min(1).max(100).default(10),
+      offset: z.number().min(0).default(0),
+      status: z.enum(['DRAFT', 'PENDING', 'PAID', 'OVERDUE', 'CANCELLED']).optional(),
+    }))
+    .query(async ({ input, ctx }) => {
+      if (!ctx.user || ctx.user.role !== 'CLIENT') {
+        throw new TRPCError({
+          code: 'FORBIDDEN',
+          message: 'Only client users can access their invoices',
+        });
+      }
+
+      const { limit, offset, status } = input;
+
+      // First get the client ID for the current user
+      const [clientRecord] = await db
+        .select({ id: clients.id })
+        .from(clients)
+        .where(and(
+          eq(clients.userId, ctx.user.id),
+          eq(clients.tenantId, ctx.tenantId!)
+        ))
+        .limit(1);
+
+      if (!clientRecord) {
+        throw new TRPCError({
+          code: 'NOT_FOUND',
+          message: 'Client profile not found',
+        });
+      }
+
+      let whereConditions = [
+        eq(invoices.clientId, clientRecord.id),
+        eq(invoices.tenantId, ctx.tenantId!)
+      ];
+
+      if (status) {
+        whereConditions.push(eq(invoices.status, status));
+      }
+
+      const clientInvoices = await db
+        .select({
+          id: invoices.id,
+          invoiceNumber: invoices.invoiceNumber,
+          status: invoices.status,
+          subtotal: invoices.subtotal,
+          tax: invoices.tax,
+          total: invoices.total,
+          currency: invoices.currency,
+          dueDate: invoices.dueDate,
+          paidAt: invoices.paidAt,
+          createdAt: invoices.createdAt,
+        })
+        .from(invoices)
+        .where(and(...whereConditions))
+        .orderBy(desc(invoices.createdAt))
+        .limit(limit)
+        .offset(offset);
+
+      const [totalResult] = await db
+        .select({ count: count() })
+        .from(invoices)
+        .where(and(...whereConditions));
+
+      return {
+        invoices: clientInvoices,
+        total: totalResult.count,
+        hasMore: offset + limit < totalResult.count,
+      };
+    }),
+
+  // Process payment for invoice (client portal)
+  processPayment: protectedProcedure
+    .input(z.object({
+      invoiceId: z.string().uuid(),
+      paymentMethodId: z.string().optional(),
+      savePaymentMethod: z.boolean().default(false),
+    }))
+    .mutation(async ({ input, ctx }) => {
+      if (!ctx.user || ctx.user.role !== 'CLIENT') {
+        throw new TRPCError({
+          code: 'FORBIDDEN',
+          message: 'Only client users can process payments',
+        });
+      }
+
+      // First get the client ID and verify invoice ownership
+      const [clientRecord] = await db
+        .select({ id: clients.id })
+        .from(clients)
+        .where(and(
+          eq(clients.userId, ctx.user.id),
+          eq(clients.tenantId, ctx.tenantId!)
+        ))
+        .limit(1);
+
+      if (!clientRecord) {
+        throw new TRPCError({
+          code: 'NOT_FOUND',
+          message: 'Client profile not found',
+        });
+      }
+
+      // Get invoice and verify ownership
+      const [invoice] = await db
+        .select()
+        .from(invoices)
+        .where(and(
+          eq(invoices.id, input.invoiceId),
+          eq(invoices.clientId, clientRecord.id),
+          eq(invoices.tenantId, ctx.tenantId!)
+        ))
+        .limit(1);
+
+      if (!invoice) {
+        throw new TRPCError({
+          code: 'NOT_FOUND',
+          message: 'Invoice not found or access denied',
+        });
+      }
+
+      if (invoice.status === 'PAID') {
+        throw new TRPCError({
+          code: 'BAD_REQUEST',
+          message: 'Invoice is already paid',
+        });
+      }
+
+      // Get payment service
+      const { paymentService } = await import('../lib/payments/PaymentService');
+
+      try {
+        // Get best payment gateway
+        const gateway = await paymentService.getBestGateway({
+          tenantId: ctx.tenantId!,
+          amount: parseFloat(invoice.total),
+          currency: invoice.currency,
+          customerId: clientRecord.id,
+          isRecurring: false
+        });
+
+        // Initialize the gateway
+        const gatewayConfig = await paymentService.getGatewayManager().getGatewayConfig(
+          ctx.tenantId!,
+          gateway.name
+        );
+        
+        if (!gatewayConfig) {
+          throw new TRPCError({
+            code: 'INTERNAL_SERVER_ERROR',
+            message: 'Payment gateway not configured',
+          });
+        }
+
+        await gateway.initialize(gatewayConfig.config);
+
+        // Create payment intent
+        const paymentIntent = await gateway.createPaymentIntent({
+          amount: parseFloat(invoice.total),
+          currency: invoice.currency,
+          tenantId: ctx.tenantId!,
+          invoiceId: invoice.id,
+          customerId: clientRecord.id,
+          metadata: {
+            invoiceId: invoice.id,
+            clientId: clientRecord.id,
+            type: 'invoice_payment',
+            processedBy: 'client_portal'
+          }
+        });
+
+        // Create payment record
+        const [payment] = await db
+          .insert(payments)
+          .values({
+            invoiceId: invoice.id,
+            amount: invoice.total,
+            currency: invoice.currency,
+            status: 'PENDING',
+            gateway: gateway.name,
+            gatewayPaymentId: paymentIntent.id,
+            tenantId: ctx.tenantId!,
+          })
+          .returning();
+
+        // Return payment intent for client-side confirmation
+        return {
+          paymentIntentId: paymentIntent.id,
+          clientSecret: paymentIntent.clientSecret,
+          amount: parseFloat(invoice.total),
+          currency: invoice.currency,
+          paymentId: payment.id,
+        };
+
+      } catch (error) {
+        console.error('Payment processing error:', error);
+        throw new TRPCError({
+          code: 'INTERNAL_SERVER_ERROR',
+          message: error instanceof Error ? error.message : 'Payment processing failed',
+        });
+      }
+    }),
+
+  // Confirm payment (webhook or client confirmation)
+  confirmPayment: protectedProcedure
+    .input(z.object({
+      paymentIntentId: z.string(),
+      paymentMethodId: z.string().optional(),
+    }))
+    .mutation(async ({ input, ctx }) => {
+      if (!ctx.user || ctx.user.role !== 'CLIENT') {
+        throw new TRPCError({
+          code: 'FORBIDDEN',
+          message: 'Only client users can confirm payments',
+        });
+      }
+
+      // Get payment record
+      const [payment] = await db
+        .select({
+          id: payments.id,
+          invoiceId: payments.invoiceId,
+          status: payments.status,
+          gateway: payments.gateway,
+          tenantId: payments.tenantId,
+        })
+        .from(payments)
+        .where(and(
+          eq(payments.gatewayPaymentId, input.paymentIntentId),
+          eq(payments.tenantId, ctx.tenantId!)
+        ))
+        .limit(1);
+
+      if (!payment) {
+        throw new TRPCError({
+          code: 'NOT_FOUND',
+          message: 'Payment not found',
+        });
+      }
+
+      if (payment.status === 'COMPLETED') {
+        throw new TRPCError({
+          code: 'BAD_REQUEST',
+          message: 'Payment already completed',
+        });
+      }
+
+      // Get payment service
+      const { paymentService } = await import('../lib/payments/PaymentService');
+
+      try {
+        // Get gateway
+        const gateway = await paymentService.getGatewayManager().getGateway(payment.gateway);
+        const gatewayConfig = await paymentService.getGatewayManager().getGatewayConfig(
+          payment.tenantId,
+          payment.gateway
+        );
+
+        if (!gatewayConfig) {
+          throw new TRPCError({
+            code: 'INTERNAL_SERVER_ERROR',
+            message: 'Payment gateway not configured',
+          });
+        }
+
+        await gateway.initialize(gatewayConfig.config);
+
+        // Confirm payment
+        const paymentResult = await gateway.confirmPayment({
+          paymentIntentId: input.paymentIntentId,
+          paymentMethodId: input.paymentMethodId,
+        });
+
+        if (paymentResult.status === 'succeeded') {
+          // Update payment record
+          await db
+            .update(payments)
+            .set({
+              status: 'COMPLETED',
+              gatewayData: paymentResult.gatewayData,
+              updatedAt: new Date(),
+            })
+            .where(eq(payments.id, payment.id));
+
+          // Mark invoice as paid
+          await db
+            .update(invoices)
+            .set({
+              status: 'PAID',
+              paidAt: new Date(),
+              updatedAt: new Date(),
+            })
+            .where(eq(invoices.id, payment.invoiceId));
+
+          // Trigger email notification
+          try {
+            await InvoiceEventHandler.handleInvoicePaid(payment.invoiceId, payment.tenantId);
+          } catch (error) {
+            console.error('Failed to send payment confirmation email:', error);
+          }
+
+          return {
+            success: true,
+            paymentId: payment.id,
+            status: 'completed',
+          };
+        } else {
+          // Update payment as failed
+          await db
+            .update(payments)
+            .set({
+              status: 'FAILED',
+              errorMessage: `Payment failed with status: ${paymentResult.status}`,
+              updatedAt: new Date(),
+            })
+            .where(eq(payments.id, payment.id));
+
+          throw new TRPCError({
+            code: 'BAD_REQUEST',
+            message: `Payment failed: ${paymentResult.status}`,
+          });
+        }
+
+      } catch (error) {
+        console.error('Payment confirmation error:', error);
+        throw new TRPCError({
+          code: 'INTERNAL_SERVER_ERROR',
+          message: error instanceof Error ? error.message : 'Payment confirmation failed',
+        });
+      }
+    }),
 });

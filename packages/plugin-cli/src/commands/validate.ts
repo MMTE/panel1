@@ -23,7 +23,7 @@ const PluginManifestSchema = z.object({
   keywords: z.array(z.string()).default([]),
 });
 
-export async function validateCommand(options: ValidateOptions) {
+export async function validateCommand(_options: ValidateOptions) {
   console.log(chalk.blue('🔍 Validating plugin...'));
 
   const cwd = process.cwd();

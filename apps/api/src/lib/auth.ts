@@ -1,5 +1,6 @@
 import jwt from 'jsonwebtoken';
 import bcrypt from 'bcryptjs';
+import crypto from 'crypto';
 import { db } from '../db/index.js';
 import { users, sessions, type User, type NewUser, type NewSession } from '../db/schema/users.js';
 import { eq, and, gte, lt } from 'drizzle-orm';
@@ -22,6 +23,8 @@ export interface JWTPayload {
   email: string;
   role: string;
   tenantId?: string | null;
+  iat?: number;
+  jti?: string;
 }
 
 /**
@@ -61,13 +64,31 @@ export function verifyToken(token: string): JWTPayload | null {
  * Create a new session for a user
  */
 export async function createSession(userId: string): Promise<string> {
+  // Get user data for more accurate token
+  const user = await getUserById(userId);
+  if (!user) {
+    throw new Error('User not found');
+  }
+
+  // Add unique timestamp and random string to ensure token uniqueness
+  const uniqueId = crypto.randomBytes(16).toString('hex');
+  const timestamp = Date.now().toString();
+  
   const token = generateToken({ 
     userId, 
-    email: '', // Will be filled when we get user data
-    role: 'CLIENT' // Default, will be updated
+    email: user.email,
+    role: user.role,
+    tenantId: user.tenantId,
+    iat: Math.floor(Date.now() / 1000),
+    jti: `${uniqueId}-${timestamp}` // JWT ID for uniqueness
   });
   
   const expiresAt = new Date(Date.now() + SESSION_EXPIRES_IN);
+  
+  // Clean up any existing sessions for this user first (dev mode cleanup)
+  if (process.env.NODE_ENV !== 'production') {
+    await db.delete(sessions).where(eq(sessions.userId, userId));
+  }
   
   await db.insert(sessions).values({
     userId,
