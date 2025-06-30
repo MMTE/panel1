@@ -17,11 +17,16 @@ import {
   LogOut,
   Loader,
   ExternalLink,
-  Save
+  Save,
+  Server,
+  Settings as SettingsIcon,
+  ArrowUpDown
 } from 'lucide-react';
 import { useAuth } from '../../hooks/useAuth';
 import { PluginSlot } from '../../lib/plugins';
 import { useClientData } from '../../hooks/useClientData';
+import type { SubscribedComponent } from '../../hooks/useClientData';
+import { useComponentManagement } from '../../hooks/useComponentManagement';
 
 export function ClientPortal() {
   const { user, signOut } = useAuth();
@@ -54,6 +59,17 @@ export function ClientPortal() {
   const [showCancelModal, setShowCancelModal] = useState(false);
   const [subscriptionToCancel, setSubscriptionToCancel] = useState<string | null>(null);
   const [isCancelling, setIsCancelling] = useState(false);
+  const [showComponentModal, setShowComponentModal] = useState(false);
+  const [selectedComponent, setSelectedComponent] = useState<SubscribedComponent | null>(null);
+  const {
+    restartComponent,
+    updateConfiguration,
+    scaleComponent,
+    getComponentStatus,
+    isRestarting,
+    isScaling,
+    error: componentError
+  } = useComponentManagement();
 
   // Initialize form data when client data is loaded
   React.useEffect(() => {
@@ -136,6 +152,45 @@ export function ClientPortal() {
     }
   };
 
+  const handleManageComponent = (subscriptionId: string, componentId: string) => {
+    const subscription = clientData?.subscriptions.find(s => s.id === subscriptionId);
+    const component = subscription?.subscribedComponents.find(c => c.id === componentId);
+    if (component) {
+      setSelectedComponent(component);
+      setShowComponentModal(true);
+    }
+  };
+
+  const handleComponentAction = async (action: string) => {
+    if (!selectedComponent) return;
+
+    try {
+      switch (action) {
+        case 'restart':
+          await restartComponent(selectedComponent.id);
+          break;
+        case 'scale':
+          const newQuantity = selectedComponent.quantity + 1; // For demo purposes
+          await scaleComponent(selectedComponent.id, newQuantity);
+          break;
+        case 'configure':
+          // Example configuration update
+          await updateConfiguration(selectedComponent.id, {
+            // Add configuration options based on component type
+            memory: '2GB',
+            cpu: '2',
+          });
+          break;
+        default:
+          console.warn('Unknown component action:', action);
+      }
+      setShowComponentModal(false);
+      setSelectedComponent(null);
+    } catch (error) {
+      console.error('Error performing component action:', error);
+    }
+  };
+
   const formatCurrency = (amount: number) => {
     return new Intl.NumberFormat('en-US', {
       style: 'currency',
@@ -178,6 +233,19 @@ export function ClientPortal() {
         return AlertCircle;
       default:
         return Activity;
+    }
+  };
+
+  const getProvisioningStatusColor = (status: string) => {
+    switch (status?.toLowerCase()) {
+      case 'active':
+        return 'bg-green-100 text-green-800';
+      case 'pending':
+        return 'bg-yellow-100 text-yellow-800';
+      case 'failed':
+        return 'bg-red-100 text-red-800';
+      default:
+        return 'bg-gray-100 text-gray-800';
     }
   };
 
@@ -229,6 +297,125 @@ export function ClientPortal() {
       </div>
     );
   }
+
+  // Component Management Modal
+  const ComponentModal = () => {
+    if (!selectedComponent) return null;
+
+    // Get real-time status
+    const { data: componentStatus } = getComponentStatus(selectedComponent.id);
+
+    return (
+      <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+        <div className="bg-white rounded-xl p-6 max-w-lg w-full mx-4">
+          <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center space-x-2">
+              <Server className="w-5 h-5 text-gray-500" />
+              <h3 className="text-lg font-semibold text-gray-900">{selectedComponent.name}</h3>
+            </div>
+            <span className={`px-2 py-1 rounded-full text-xs font-medium ${getProvisioningStatusColor(componentStatus?.status || selectedComponent.provisioningStatus)}`}>
+              {componentStatus?.status || selectedComponent.provisioningStatus}
+            </span>
+          </div>
+
+          <div className="space-y-4 mb-6">
+            <p className="text-gray-600">{selectedComponent.description || selectedComponent.definition.description}</p>
+            
+            <div className="bg-gray-50 rounded-lg p-4 space-y-2">
+              <div className="flex justify-between">
+                <span className="text-gray-600">Type</span>
+                <span className="font-medium">{selectedComponent.definition.type}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-gray-600">Provider</span>
+                <span className="font-medium">{selectedComponent.definition.provider}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-gray-600">Quantity</span>
+                <span className="font-medium">{selectedComponent.quantity}</span>
+              </div>
+              {selectedComponent.unitPrice && (
+                <div className="flex justify-between">
+                  <span className="text-gray-600">Unit Price</span>
+                  <span className="font-medium">{formatCurrency(parseFloat(selectedComponent.unitPrice))}</span>
+                </div>
+              )}
+            </div>
+
+            {componentStatus?.metrics && (
+              <div>
+                <h4 className="text-sm font-medium text-gray-700 mb-2">Current Metrics</h4>
+                <ul className="bg-gray-50 rounded-lg p-4 space-y-2">
+                  {Object.entries(componentStatus.metrics).map(([key, value]) => (
+                    <li key={key} className="flex justify-between text-sm">
+                      <span className="text-gray-600">{key}</span>
+                      <span className="font-medium">{String(value)}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
+            {selectedComponent.definition.features && Object.keys(selectedComponent.definition.features).length > 0 && (
+              <div>
+                <h4 className="text-sm font-medium text-gray-700 mb-2">Features</h4>
+                <ul className="bg-gray-50 rounded-lg p-4 space-y-2">
+                  {Object.entries(selectedComponent.definition.features).map(([key, value]) => (
+                    <li key={key} className="flex justify-between text-sm">
+                      <span className="text-gray-600">{key}</span>
+                      <span className="font-medium">{String(value)}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
+            {componentError && (
+              <div className="bg-red-50 border border-red-200 rounded-lg p-4 text-sm text-red-700">
+                {componentError}
+              </div>
+            )}
+          </div>
+
+          <div className="flex space-x-2">
+            {selectedComponent.definition.options?.controlPanelUrl && (
+              <a
+                href={selectedComponent.definition.options.controlPanelUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex-1 bg-white border border-gray-200 text-gray-700 px-4 py-2 rounded-lg hover:bg-gray-50 transition-colors flex items-center justify-center space-x-1"
+              >
+                <ExternalLink className="w-4 h-4" />
+                <span>Control Panel</span>
+              </a>
+            )}
+            <button
+              onClick={() => handleComponentAction('restart')}
+              disabled={isRestarting}
+              className="flex-1 bg-white border border-gray-200 text-gray-700 px-4 py-2 rounded-lg hover:bg-gray-50 transition-colors flex items-center justify-center space-x-1 disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              <SettingsIcon className="w-4 h-4" />
+              <span>{isRestarting ? 'Restarting...' : 'Restart'}</span>
+            </button>
+            <button
+              onClick={() => handleComponentAction('scale')}
+              disabled={isScaling}
+              className="flex-1 bg-white border border-gray-200 text-gray-700 px-4 py-2 rounded-lg hover:bg-gray-50 transition-colors flex items-center justify-center space-x-1 disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              <ArrowUpDown className="w-4 h-4" />
+              <span>{isScaling ? 'Scaling...' : 'Scale'}</span>
+            </button>
+            <button
+              onClick={() => setShowComponentModal(false)}
+              className="flex-1 bg-gray-100 text-gray-700 px-4 py-2 rounded-lg hover:bg-gray-200 transition-colors"
+            >
+              Close
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  };
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -452,56 +639,97 @@ export function ClientPortal() {
                 </div>
 
                 {clientData.subscriptions.length > 0 ? (
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  <div className="grid grid-cols-1 gap-8">
                     {clientData.subscriptions.map((subscription) => (
                       <div key={subscription.id} className="bg-white border border-gray-200 rounded-xl p-6">
                         <div className="flex items-center justify-between mb-4">
-                          <h3 className="text-lg font-semibold text-gray-900">{subscription.plan.name}</h3>
-                          <span className={`px-3 py-1 rounded-full text-sm font-medium ${
-                            subscription.status === 'ACTIVE' ? 'bg-green-100 text-green-800' : 
-                            subscription.status === 'CANCELLED' ? 'bg-red-100 text-red-800' : 
-                            'bg-gray-100 text-gray-800'
-                          }`}>
+                          <h3 className="text-lg font-semibold text-gray-900">{subscription.planName}</h3>
+                          <span className={`px-3 py-1 rounded-full text-sm font-medium ${getStatusColor(subscription.status)}`}>
                             {subscription.status}
                           </span>
                         </div>
 
                         <div className="space-y-3 mb-6">
                           <div className="flex justify-between">
-                            <span className="text-gray-600">Price</span>
-                            <span className="font-medium">
-                              {formatCurrency(subscription.plan.price)}/{subscription.plan.interval.toLowerCase()}
-                            </span>
-                          </div>
-                          <div className="flex justify-between">
                             <span className="text-gray-600">Current Period</span>
                             <span className="font-medium">
-                              {formatDate(subscription.current_period_start)} - {formatDate(subscription.current_period_end)}
+                              {formatDate(subscription.currentPeriodStart)} - {formatDate(subscription.currentPeriodEnd)}
                             </span>
                           </div>
                           <div className="flex justify-between">
                             <span className="text-gray-600">Next Billing</span>
-                            <span className="font-medium">{formatDate(subscription.next_billing_date)}</span>
+                            <span className="font-medium">{formatDate(subscription.nextBillingDate)}</span>
                           </div>
                         </div>
 
-                        <div className="flex space-x-2">
-                          <button className="flex-1 bg-gray-100 text-gray-700 px-4 py-2 rounded-lg hover:bg-gray-200 transition-colors flex items-center justify-center space-x-1">
-                            <Eye className="w-4 h-4" />
-                            <span>Details</span>
+                        {subscription.subscribedComponents?.length > 0 && (
+                          <div className="mt-6">
+                            <h4 className="text-sm font-medium text-gray-700 mb-3">Subscribed Components</h4>
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                              {subscription.subscribedComponents.map(component => (
+                                <div key={component.id} className="bg-gray-50 rounded-lg p-4 border border-gray-200">
+                                  <div className="flex items-center justify-between mb-3">
+                                    <div className="flex items-center space-x-2">
+                                      <Server className="w-4 h-4 text-gray-500" />
+                                      <h4 className="font-medium text-gray-900">{component.name}</h4>
+                                    </div>
+                                    <span className={`px-2 py-1 rounded-full text-xs font-medium ${getProvisioningStatusColor(component.provisioningStatus)}`}>
+                                      {component.provisioningStatus}
+                                    </span>
+                                  </div>
+                                  
+                                  <p className="text-sm text-gray-600 mb-3">{component.description || component.definition.description}</p>
+                                  
+                                  <div className="space-y-2 mb-4">
+                                    <div className="flex justify-between text-sm">
+                                      <span className="text-gray-600">Quantity</span>
+                                      <span className="font-medium">{component.quantity}</span>
+                                    </div>
+                                    {component.unitPrice && (
+                                      <div className="flex justify-between text-sm">
+                                        <span className="text-gray-600">Unit Price</span>
+                                        <span className="font-medium">{formatCurrency(parseFloat(component.unitPrice))}</span>
+                                      </div>
+                                    )}
+                                  </div>
+
+                                  <div className="flex space-x-2">
+                                    <button
+                                      onClick={() => handleManageComponent(subscription.id, component.id)}
+                                      className="flex-1 bg-white border border-gray-200 text-gray-700 px-3 py-1.5 rounded-lg hover:bg-gray-50 transition-colors flex items-center justify-center space-x-1 text-sm"
+                                    >
+                                      <SettingsIcon className="w-4 h-4" />
+                                      <span>Manage</span>
+                                    </button>
+                                    {component.definition.options?.controlPanelUrl && (
+                                      <a
+                                        href={component.definition.options.controlPanelUrl}
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        className="flex-1 bg-white border border-gray-200 text-gray-700 px-3 py-1.5 rounded-lg hover:bg-gray-50 transition-colors flex items-center justify-center space-x-1 text-sm"
+                                      >
+                                        <ExternalLink className="w-4 h-4" />
+                                        <span>Control Panel</span>
+                                      </a>
+                                    )}
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+
+                        <div className="flex space-x-2 mt-6">
+                          <button 
+                            onClick={() => {
+                              setSubscriptionToCancel(subscription.id);
+                              setShowCancelModal(true);
+                            }}
+                            className="flex-1 border border-red-300 text-red-700 px-4 py-2 rounded-lg hover:bg-red-50 transition-colors flex items-center justify-center space-x-1"
+                          >
+                            <AlertCircle className="w-4 h-4" />
+                            <span>Cancel</span>
                           </button>
-                          {subscription.status === 'ACTIVE' && (
-                            <button 
-                              onClick={() => {
-                                setSubscriptionToCancel(subscription.id);
-                                setShowCancelModal(true);
-                              }}
-                              className="flex-1 border border-red-300 text-red-700 px-4 py-2 rounded-lg hover:bg-red-50 transition-colors flex items-center justify-center space-x-1"
-                            >
-                              <AlertCircle className="w-4 h-4" />
-                              <span>Cancel</span>
-                            </button>
-                          )}
                         </div>
                       </div>
                     ))}
@@ -647,7 +875,7 @@ export function ClientPortal() {
                             name="email"
                             value={formData.email}
                             onChange={handleInputChange}
-                            className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+                            className="w-full border border-gray-300 rounded-lg px-3 py-2 text-gray-900 focus:ring-2 focus:ring-purple-500 focus:border-transparent"
                           />
                         </div>
                         <div>
@@ -657,7 +885,7 @@ export function ClientPortal() {
                             name="phone"
                             value={formData.phone}
                             onChange={handleInputChange}
-                            className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+                            className="w-full border border-gray-300 rounded-lg px-3 py-2 text-gray-900 focus:ring-2 focus:ring-purple-500 focus:border-transparent"
                           />
                         </div>
                       </div>
@@ -810,6 +1038,8 @@ export function ClientPortal() {
           </div>
         </div>
       )}
+
+      {showComponentModal && <ComponentModal />}
     </div>
   );
 }

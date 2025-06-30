@@ -15,6 +15,7 @@ import {
 } from 'lucide-react';
 import { useAuth } from '../hooks/useAuth';
 import { trpc } from '../api/trpc';
+import { usePermissions } from '../hooks/usePermissions';
 
 interface UserProfile {
   id: string;
@@ -27,8 +28,10 @@ interface UserProfile {
   createdAt: Date;
 }
 
+// NOTE: This component is for development only and uses RBAC system for permissions
+
 // Fallback mock profiles for when database is not available
-const FALLBACK_PROFILES: UserProfile[] = [
+const FALLBACK_PROFILES = [
   {
     id: 'admin-dev-1',
     email: 'admin@panel1.dev',
@@ -63,6 +66,7 @@ const FALLBACK_PROFILES: UserProfile[] = [
 
 export function DevBottomBar() {
   const { user, switchDemoRole, switchDemoProfile, impersonateUser } = useAuth();
+  const { userPermissions, loading: permissionsLoading } = usePermissions();
   const [isVisible, setIsVisible] = useState(true);
   const [isExpanded, setIsExpanded] = useState(false);
   const [selectedProfile, setSelectedProfile] = useState<UserProfile | null>(() => {
@@ -100,17 +104,27 @@ export function DevBottomBar() {
   
   // Auto-switch to persisted profile on mount (only once)
   useEffect(() => {
-    if (selectedProfile && !user && !loadingUsers) {
+    const loadSavedProfile = async () => {
+      if (!selectedProfile || user || loadingUsers) return;
+
       console.log(`🔄 Auto-loading saved profile: ${selectedProfile.firstName} ${selectedProfile.lastName}`);
-      if (useRealUsers && realUsersData?.users?.some(u => u.id === selectedProfile.id)) {
-        impersonateUser(selectedProfile.id).catch((error) => {
-          console.warn('Failed to impersonate saved user, switching to demo profile:', error);
-          switchDemoProfile(selectedProfile);
-        });
-      } else {
-        switchDemoProfile(selectedProfile);
+      try {
+        if (useRealUsers && realUsersData?.users?.some(u => u.id === selectedProfile.id)) {
+          await impersonateUser(selectedProfile.id);
+        } else {
+          await switchDemoProfile(selectedProfile);
+        }
+      } catch (error) {
+        console.warn('Failed to load saved profile:', error);
+        // Clear the saved profile to prevent infinite retry
+        if (typeof window !== 'undefined') {
+          localStorage.removeItem('dev-selected-profile');
+          setSelectedProfile(null);
+        }
       }
-    }
+    };
+
+    loadSavedProfile();
   }, [selectedProfile, user, loadingUsers, realUsersData]);
   
   if (!isDev || !isVisible) return null;
@@ -131,6 +145,11 @@ export function DevBottomBar() {
   const CurrentRoleIcon = roleIcons[currentProfile.role];
 
   const switchToProfile = async (profile: UserProfile) => {
+    if (!profile || !profile.id) {
+      console.error('Invalid profile for demo switch:', profile);
+      return;
+    }
+
     setSelectedProfile(profile);
     
     try {
@@ -138,25 +157,27 @@ export function DevBottomBar() {
         await impersonateUser(profile.id);
         console.log(`✅ Successfully impersonated real user: ${profile.firstName} ${profile.lastName}`);
       } else {
-        switchDemoProfile(profile);
+        await switchDemoProfile(profile);
+      }
+
+      // Only persist the profile if the switch was successful
+      if (typeof window !== 'undefined') {
+        try {
+          localStorage.setItem('dev-selected-profile', JSON.stringify(profile));
+          window.dispatchEvent(new CustomEvent('dev-profile-switch', { 
+            detail: profile 
+          }));
+        } catch (error) {
+          console.warn('Failed to persist dev profile:', error);
+        }
       }
     } catch (error) {
-      console.error('Failed to switch to profile:', error);
-      // Fallback to demo profile switching
-      switchDemoProfile(profile);
-    }
-    
-    // Persist the selected profile
-    if (typeof window !== 'undefined') {
-      try {
-        localStorage.setItem('dev-selected-profile', JSON.stringify(profile));
-      } catch (error) {
-        console.warn('Failed to persist dev profile:', error);
+      console.error(`❌ Failed to switch to profile ${profile.firstName}:`, error);
+      // Clear the selected profile on error to prevent infinite loops
+      setSelectedProfile(null);
+      if (typeof window !== 'undefined') {
+        localStorage.removeItem('dev-selected-profile');
       }
-      
-      window.dispatchEvent(new CustomEvent('dev-profile-switch', { 
-        detail: profile 
-      }));
     }
   };
 

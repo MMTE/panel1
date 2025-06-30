@@ -10,6 +10,23 @@ export const queryClient = new QueryClient({
     queries: {
       refetchOnWindowFocus: false,
       staleTime: 1000 * 60 * 5, // 5 minutes
+      retry: (failureCount, error: any) => {
+        // Don't retry on 404s or auth errors
+        if (error?.data?.code === 'NOT_FOUND' || 
+            error?.data?.code === 'UNAUTHORIZED' || 
+            error?.data?.code === 'FORBIDDEN') {
+          return false;
+        }
+        // Only retry 3 times for other errors
+        return failureCount < 3;
+      },
+      retryDelay: (attemptIndex) => Math.min(1000 * 2 ** attemptIndex, 30000),
+    },
+    mutations: {
+      retry: false, // Don't retry mutations by default
+      onError: (error: any) => {
+        console.error('Mutation error:', error);
+      }
     },
   },
 });
@@ -36,6 +53,12 @@ export const trpcClient = trpc.createClient({
           'Content-Type': 'application/json',
         };
       },
+      fetch(url, options) {
+        return fetch(url, {
+          ...options,
+          credentials: 'include'
+        });
+      }
     }),
   ],
 });

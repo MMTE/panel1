@@ -46,6 +46,7 @@
     "@trpc/client": "^10.45.0",
     "@trpc/react-query": "^10.45.0",
     "@trpc/server": "^10.45.0",
+    "dotenv": "^17.0.0",
     "drizzle-kit": "^0.19.13",
     "drizzle-orm": "^0.28.6",
     "lucide-react": "^0.344.0",

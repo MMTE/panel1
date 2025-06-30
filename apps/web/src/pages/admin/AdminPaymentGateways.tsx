@@ -19,6 +19,7 @@ import {
 import { PluginSlot } from '../../lib/plugins';
 import { useAuth } from '../../hooks/useAuth';
 import { trpc } from '../../api/trpc';
+import { Can, usePermissions } from '../../hooks/usePermissions';
 
 interface PaymentGateway {
   id: string;
@@ -51,9 +52,35 @@ export function AdminPaymentGateways() {
     enabled: !!user,
   });
 
-  const gateways = gatewaysData?.gateways || [];
+  // Fetch payment gateway statistics
+  const { data: gatewayStats, isLoading: statsLoading, refetch: refetchStats } = trpc.paymentGateways.getStats.useQuery(
+    undefined,
+    { enabled: !!user }
+  );
 
-  // Mock data for demonstration
+  const gateways = gatewaysData?.gateways || [];
+  const stats = gatewayStats || [];
+
+  // Convert gateway stats to display format
+  const displayGateways = stats.map(stat => ({
+    id: stat.gatewayName,
+    name: stat.displayName,
+    type: stat.gatewayName.toUpperCase() as 'STRIPE' | 'PAYPAL' | 'SQUARE' | 'CUSTOM',
+    status: stat.status as 'ACTIVE' | 'INACTIVE' | 'TESTING' | 'ERROR',
+    isDefault: false, // TODO: Add default gateway logic
+    stats: {
+      totalTransactions: stat.totalPayments,
+      totalRevenue: stat.totalAmount,
+      successRate: stat.successRate,
+    },
+    health: {
+      status: stat.healthCheckStatus === 'healthy' ? 'HEALTHY' : 
+              stat.healthCheckStatus === 'warning' ? 'WARNING' : 'ERROR',
+      lastCheck: stat.lastHealthCheck?.toISOString() || new Date().toISOString(),
+    },
+  }));
+
+  // Mock data for demonstration when no real data available
   const mockGateways: PaymentGateway[] = [
     {
       id: '1',
@@ -87,25 +114,9 @@ export function AdminPaymentGateways() {
         lastCheck: new Date(Date.now() - 300000).toISOString(),
       },
     },
-    {
-      id: '3',
-      name: 'Square',
-      type: 'SQUARE',
-      status: 'TESTING',
-      isDefault: false,
-      stats: {
-        totalTransactions: 0,
-        totalRevenue: 0,
-        successRate: 0,
-      },
-      health: {
-        status: 'WARNING',
-        lastCheck: new Date(Date.now() - 600000).toISOString(),
-      },
-    },
   ];
 
-  const displayGateways = gateways.length > 0 ? gateways : mockGateways;
+  const finalGateways = displayGateways.length > 0 ? displayGateways : mockGateways;
 
   const formatCurrency = (amount: number) => {
     return new Intl.NumberFormat('en-US', {
@@ -177,19 +188,24 @@ export function AdminPaymentGateways() {
 
         <div className="flex items-center space-x-3">
           <button
-            onClick={() => refetchGateways()}
+            onClick={() => {
+              refetchGateways();
+              refetchStats();
+            }}
             className="px-3 py-2 text-gray-700 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors flex items-center space-x-2"
           >
             <RefreshCw className="w-4 h-4" />
             <span>Refresh</span>
           </button>
           
+          <Can permission="payment.manage_gateways">
           <button 
             className="bg-gradient-to-r from-purple-500 to-pink-500 text-white px-4 py-2 rounded-lg hover:from-purple-600 hover:to-pink-600 transition-all duration-200 flex items-center space-x-2"
           >
             <Plus className="w-4 h-4" />
             <span>Add Gateway</span>
           </button>
+          </Can>
         </div>
       </div>
 
@@ -226,14 +242,14 @@ export function AdminPaymentGateways() {
 
           <div className="flex items-center space-x-2 text-sm text-gray-500">
             <CreditCard className="w-4 h-4" />
-            <span>{displayGateways.length} gateways</span>
+            <span>{finalGateways.length} gateways</span>
           </div>
         </div>
       </div>
 
       {/* Gateways Grid */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-        {displayGateways.map((gateway) => (
+        {finalGateways.map((gateway) => (
           <div key={gateway.id} className="bg-white rounded-xl shadow-sm border border-gray-200 p-6 hover:shadow-md transition-shadow">
             <div className="flex items-start justify-between mb-4">
               <div className="flex items-center space-x-3">
@@ -305,7 +321,7 @@ export function AdminPaymentGateways() {
       </div>
 
       {/* Empty State */}
-      {displayGateways.length === 0 && !gatewaysLoading && (
+      {finalGateways.length === 0 && !gatewaysLoading && (
         <div className="text-center py-12">
           <CreditCard className="w-12 h-12 text-gray-400 mx-auto mb-4" />
           <h3 className="text-lg font-medium text-gray-900 mb-2">No payment gateways found</h3>
@@ -323,7 +339,7 @@ export function AdminPaymentGateways() {
       {/* Plugin Slots */}
       <PluginSlot 
         slotId="admin.page.paymentGateways.bottom" 
-        props={{ user, gateways: displayGateways }}
+        props={{ user, gateways: finalGateways }}
         className="space-y-6"
       />
     </div>

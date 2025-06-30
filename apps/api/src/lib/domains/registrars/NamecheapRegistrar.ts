@@ -386,53 +386,208 @@ export class NamecheapRegistrar extends EventEmitter {
   // Private API call method
   private async makeApiCall(params: Record<string, string>): Promise<any> {
     try {
-      const url = new URL(this.baseUrl);
-      
-      // Add common parameters
-      const allParams = {
-        ...params,
+      const queryParams = new URLSearchParams({
         ApiUser: this.config.username,
         ApiKey: this.config.apiKey,
         UserName: this.config.username,
         ClientIp: this.config.clientIp || '127.0.0.1',
-      };
-
-      // Add parameters to URL
-      Object.entries(allParams).forEach(([key, value]) => {
-        url.searchParams.append(key, value);
+        ...params
       });
 
-      const response = await fetch(url.toString(), {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/x-www-form-urlencoded',
-        },
-      });
+      const response = await fetch(`${this.baseUrl}?${queryParams.toString()}`);
+      const xmlText = await response.text();
 
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      // Parse XML response
+      const parser = new DOMParser();
+      const xmlDoc = parser.parseFromString(xmlText, 'text/xml');
+
+      // Check for API errors
+      const errors = xmlDoc.getElementsByTagName('Errors')[0];
+      if (errors && errors.childNodes.length > 0) {
+        const errorMessages = Array.from(errors.getElementsByTagName('Error'))
+          .map(error => ({
+            code: error.getAttribute('Number'),
+            message: error.textContent
+          }));
+
+        return {
+          success: false,
+          error: {
+            code: errorMessages[0].code,
+            message: errorMessages[0].message,
+            details: errorMessages
+          }
+        };
       }
 
-      const xmlText = await response.text();
+      // Get command-specific response
+      const commandType = params.Command.split('.')[1]; // e.g., 'domains' from 'namecheap.domains.create'
+      const responseType = this.getResponseType(commandType);
       
-      // TODO: Parse XML response properly
-      // For now, return a mock success response
+      const responseElement = xmlDoc.getElementsByTagName(responseType)[0];
+      if (!responseElement) {
+        throw new Error(`Invalid response format: missing ${responseType} element`);
+      }
+
+      // Parse response based on command type
+      const data = this.parseCommandResponse(responseElement, commandType);
+
       return {
         success: true,
-        data: {
-          DomainID: Math.random().toString(36).substring(7),
-          ExpiryDate: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString(),
-        },
+        data
       };
     } catch (error) {
+      console.error('Namecheap API call error:', error);
       return {
         success: false,
         error: {
-          message: error instanceof Error ? error.message : 'API call failed',
-          details: error,
-        },
+          code: 'API_ERROR',
+          message: error instanceof Error ? error.message : 'Unknown error occurred',
+          details: error
+        }
       };
     }
+  }
+
+  private getResponseType(commandType: string): string {
+    const responseTypes: Record<string, string> = {
+      'domains': 'DomainCreateResult',
+      'dns': 'DnsSetHostsResult',
+      'transfer': 'TransferCreateResult',
+      'getinfo': 'DomainGetInfoResult',
+      'check': 'DomainCheckResult',
+      'renew': 'DomainRenewResult'
+    };
+
+    return responseTypes[commandType] || 'CommandResponse';
+  }
+
+  private parseCommandResponse(element: Element, commandType: string): any {
+    switch (commandType) {
+      case 'domains':
+        return this.parseDomainResponse(element);
+      case 'dns':
+        return this.parseDnsResponse(element);
+      case 'transfer':
+        return this.parseTransferResponse(element);
+      case 'getinfo':
+        return this.parseGetInfoResponse(element);
+      case 'check':
+        return this.parseCheckResponse(element);
+      case 'renew':
+        return this.parseRenewResponse(element);
+      default:
+        return this.parseGenericResponse(element);
+    }
+  }
+
+  private parseDomainResponse(element: Element): any {
+    return {
+      DomainID: element.getAttribute('DomainID'),
+      OrderID: element.getAttribute('OrderID'),
+      TransactionID: element.getAttribute('TransactionID'),
+      Registered: element.getAttribute('Registered') === 'true',
+      ChargedAmount: element.getAttribute('ChargedAmount'),
+      ExpiryDate: element.getAttribute('ExpiryDate'),
+      WhoisguardEnabled: element.getAttribute('WhoisguardEnabled') === 'true'
+    };
+  }
+
+  private parseDnsResponse(element: Element): any {
+    const hosts = Array.from(element.getElementsByTagName('Host')).map(host => ({
+      Name: host.getAttribute('Name'),
+      Type: host.getAttribute('Type'),
+      Address: host.getAttribute('Address'),
+      MXPref: host.getAttribute('MXPref'),
+      TTL: host.getAttribute('TTL')
+    }));
+
+    return {
+      Domain: element.getAttribute('Domain'),
+      IsSuccess: element.getAttribute('IsSuccess') === 'true',
+      Hosts: hosts
+    };
+  }
+
+  private parseTransferResponse(element: Element): any {
+    return {
+      TransferID: element.getAttribute('TransferID'),
+      OrderID: element.getAttribute('OrderID'),
+      TransactionID: element.getAttribute('TransactionID'),
+      Status: element.getAttribute('Status'),
+      StatusDescription: element.getAttribute('StatusDescription')
+    };
+  }
+
+  private parseGetInfoResponse(element: Element): any {
+    const registrant = element.getElementsByTagName('Registrant')[0];
+    const nameservers = Array.from(element.getElementsByTagName('Nameserver'))
+      .map(ns => ns.textContent);
+
+    return {
+      Status: element.getAttribute('Status'),
+      DomainName: element.getAttribute('DomainName'),
+      ExpiryDate: element.getAttribute('ExpiryDate'),
+      CreatedDate: element.getAttribute('CreatedDate'),
+      Registrant: registrant ? {
+        FirstName: registrant.getAttribute('FirstName'),
+        LastName: registrant.getAttribute('LastName'),
+        Organization: registrant.getAttribute('Organization'),
+        Email: registrant.getAttribute('EmailAddress'),
+        Phone: registrant.getAttribute('Phone')
+      } : null,
+      Nameservers: nameservers,
+      WhoisGuardEnabled: element.getAttribute('WhoisGuardEnabled') === 'true',
+      PremiumDnsEnabled: element.getAttribute('PremiumDnsEnabled') === 'true',
+      AutoRenewEnabled: element.getAttribute('AutoRenewEnabled') === 'true'
+    };
+  }
+
+  private parseCheckResponse(element: Element): any {
+    const domains = Array.from(element.getElementsByTagName('Domain')).map(domain => ({
+      Name: domain.getAttribute('Domain'),
+      Available: domain.getAttribute('Available') === 'true',
+      IsPremium: domain.getAttribute('IsPremium') === 'true',
+      PremiumRegistrationPrice: domain.getAttribute('PremiumRegistrationPrice'),
+      PremiumRenewalPrice: domain.getAttribute('PremiumRenewalPrice')
+    }));
+
+    return {
+      Domains: domains
+    };
+  }
+
+  private parseRenewResponse(element: Element): any {
+    return {
+      DomainID: element.getAttribute('DomainID'),
+      OrderID: element.getAttribute('OrderID'),
+      TransactionID: element.getAttribute('TransactionID'),
+      Renewed: element.getAttribute('Renewed') === 'true',
+      ChargedAmount: element.getAttribute('ChargedAmount'),
+      ExpiryDate: element.getAttribute('ExpiryDate'),
+      OrderDetails: element.getAttribute('OrderDetails')
+    };
+  }
+
+  private parseGenericResponse(element: Element): any {
+    const result: Record<string, any> = {};
+    
+    // Get all attributes
+    Array.from(element.attributes).forEach(attr => {
+      result[attr.name] = attr.value;
+    });
+
+    // Get all child elements
+    Array.from(element.children).forEach(child => {
+      const key = child.tagName;
+      if (child.children.length > 0) {
+        result[key] = this.parseGenericResponse(child);
+      } else {
+        result[key] = child.textContent;
+      }
+    });
+
+    return result;
   }
 
   // Health check

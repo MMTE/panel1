@@ -1,4 +1,8 @@
 import { EventEmitter } from 'events';
+import { db } from '../../db';
+import { permissions, rolePermissions, users, roleHierarchy } from '../../db/schema';
+import { eq, and } from 'drizzle-orm';
+import { logger } from '../logging/Logger';
 
 // Permission actions
 export enum PermissionAction {
@@ -59,6 +63,7 @@ export enum Role {
 // Permission definition
 export interface Permission {
   id: string;
+  name: string;
   resource: ResourceType;
   action: PermissionAction;
   conditions?: PermissionCondition[];
@@ -78,7 +83,7 @@ export interface UserPermissionContext {
   role: Role;
   tenantId?: string;
   clientId?: string;
-  permissions: string[]; // Permission IDs
+  permissions?: string[]; // Permission IDs from database
   metadata?: Record<string, any>;
 }
 
@@ -94,9 +99,12 @@ export interface ResourceContext {
 
 export class PermissionManager extends EventEmitter {
   private static instance: PermissionManager;
-  private permissions: Map<string, Permission> = new Map();
   private rolePermissions: Map<Role, Set<string>> = new Map();
   private roleHierarchy: Map<Role, Role[]> = new Map();
+  private permissions: Map<string, Permission> = new Map();
+  private permissionsCache: Map<string, Permission> = new Map();
+  private cacheExpiry: Date = new Date(0);
+  private readonly CACHE_TTL = 5 * 60 * 1000; // 5 minutes
 
   private constructor() {
     super();
@@ -113,7 +121,232 @@ export class PermissionManager extends EventEmitter {
   }
 
   /**
-   * Initialize all available permissions
+   * Load permissions from database with caching
+   */
+  private async loadPermissions(): Promise<void> {
+    if (this.cacheExpiry > new Date()) {
+      return; // Cache is still valid
+    }
+
+    try {
+      // Load all permissions
+      const dbPermissions = await db.select().from(permissions);
+      this.permissionsCache.clear();
+
+      for (const perm of dbPermissions) {
+        const permission: Permission = {
+          id: perm.id,
+          name: perm.name,
+          resource: perm.resource as ResourceType,
+          action: perm.action as PermissionAction,
+          description: perm.description,
+          conditions: perm.conditions ? JSON.parse(perm.conditions) : undefined
+        };
+        this.permissionsCache.set(perm.name, permission);
+      }
+
+      // Load role-permission mappings
+      const rolePerms = await db.select({
+        roleId: rolePermissions.roleId,
+        permissionName: permissions.name
+      })
+      .from(rolePermissions)
+      .innerJoin(permissions, eq(rolePermissions.permissionId, permissions.id));
+
+      this.rolePermissions.clear();
+      for (const rolePerm of rolePerms) {
+        const role = rolePerm.roleId as Role;
+        if (!this.rolePermissions.has(role)) {
+          this.rolePermissions.set(role, new Set());
+        }
+        this.rolePermissions.get(role)!.add(rolePerm.permissionName);
+      }
+
+      // Update cache expiry
+      this.cacheExpiry = new Date(Date.now() + this.CACHE_TTL);
+      
+      logger.info(`Loaded ${this.permissionsCache.size} permissions and role mappings into cache`);
+    } catch (error) {
+      logger.error('Failed to load permissions from database:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Check if user has a specific permission
+   */
+  async hasPermission(
+    userContext: UserPermissionContext,
+    permissionId: string,
+    resourceContext?: ResourceContext
+  ): Promise<boolean> {
+    try {
+      await this.loadPermissions();
+
+      // Super admin bypass
+      if (userContext.role === Role.SUPER_ADMIN) {
+        return true;
+      }
+
+      // Check direct role permissions
+      const rolePermissions = this.rolePermissions.get(userContext.role);
+      let hasDirectPermission = false;
+      
+      if (rolePermissions?.has(permissionId)) {
+        hasDirectPermission = true;
+      } else {
+        // Check inherited permissions through role hierarchy
+        hasDirectPermission = await this.hasInheritedPermission(userContext.role, permissionId);
+      }
+
+      if (!hasDirectPermission) {
+        return false;
+      }
+
+      // If there's no resource context, permission is granted
+      if (!resourceContext) {
+        return true;
+      }
+
+      // Get permission details for condition evaluation
+      const permission = this.permissionsCache.get(permissionId);
+      if (!permission) {
+        logger.warn(`Permission not found: ${permissionId}`);
+        return false;
+      }
+
+      // If permission has conditions, evaluate them
+      if (permission.conditions && permission.conditions.length > 0) {
+        return this.evaluateConditions(permission.conditions, userContext, resourceContext);
+      }
+
+      return true;
+    } catch (error) {
+      logger.error('Error checking permission:', error);
+      return false;
+    }
+  }
+
+  /**
+   * Check if role has permission through inheritance
+   */
+  private async hasInheritedPermission(role: Role, permissionId: string): Promise<boolean> {
+    try {
+      // Get all roles that this role inherits from
+      const inheritedRoles = await db.query.roleHierarchy.findMany({
+        where: eq(roleHierarchy.childRole, role)
+      });
+
+      // Check if any inherited role has the permission
+      for (const { parentRole } of inheritedRoles) {
+        const rolePermissions = this.rolePermissions.get(parentRole as Role);
+        if (rolePermissions?.has(permissionId)) {
+          return true;
+        }
+      }
+
+      return false;
+    } catch (error) {
+      logger.error('Error checking inherited permissions:', error);
+      return false;
+    }
+  }
+
+  /**
+   * Get all permissions for a user's role
+   */
+  async getUserPermissions(userContext: UserPermissionContext): Promise<string[]> {
+    await this.loadPermissions();
+    const rolePermissions = this.rolePermissions.get(userContext.role);
+    return rolePermissions ? Array.from(rolePermissions) : [];
+  }
+
+  /**
+   * Get all permissions for a specific role
+   */
+  async getRolePermissions(role: Role): Promise<string[]> {
+    await this.loadPermissions();
+    const rolePermissions = this.rolePermissions.get(role);
+    return rolePermissions ? Array.from(rolePermissions) : [];
+  }
+
+  /**
+   * Get permission definition by name
+   */
+  async getPermission(permissionName: string): Promise<Permission | undefined> {
+    await this.loadPermissions();
+    return this.permissionsCache.get(permissionName);
+  }
+
+  /**
+   * Get all available permissions
+   */
+  async getAllPermissions(): Promise<Permission[]> {
+    await this.loadPermissions();
+    return Array.from(this.permissionsCache.values());
+  }
+
+  /**
+   * Add a new permission to a role
+   */
+  async addPermissionToRole(role: Role, permissionName: string): Promise<void> {
+    try {
+      const permission = await db.select().from(permissions).where(eq(permissions.name, permissionName));
+      if (permission.length === 0) {
+        throw new Error(`Permission not found: ${permissionName}`);
+      }
+
+      await db.insert(rolePermissions).values({
+        roleId: role,
+        permissionId: permission[0].id
+      });
+
+      // Clear cache to force reload
+      this.cacheExpiry = new Date(0);
+      logger.info(`Added permission ${permissionName} to role ${role}`);
+    } catch (error) {
+      logger.error('Failed to add permission to role:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Remove a permission from a role
+   */
+  async removePermissionFromRole(role: Role, permissionName: string): Promise<void> {
+    try {
+      const permission = await db.select().from(permissions).where(eq(permissions.name, permissionName));
+      if (permission.length === 0) {
+        throw new Error(`Permission not found: ${permissionName}`);
+      }
+
+      await db.delete(rolePermissions).where(
+        and(
+          eq(rolePermissions.roleId, role),
+          eq(rolePermissions.permissionId, permission[0].id)
+        )
+      );
+
+      // Clear cache to force reload
+      this.cacheExpiry = new Date(0);
+      logger.info(`Removed permission ${permissionName} from role ${role}`);
+    } catch (error) {
+      logger.error('Failed to remove permission from role:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Clear permissions cache
+   */
+  clearCache(): void {
+    this.cacheExpiry = new Date(0);
+    this.rolePermissions.clear();
+    this.permissionsCache.clear();
+  }
+
+  /**
+   * Initialize all available permissions (DEPRECATED - now using database)
    */
   private initializePermissions(): void {
     const permissions: Permission[] = [
@@ -345,30 +578,25 @@ export class PermissionManager extends EventEmitter {
     userContext: UserPermissionContext,
     resourceContext: ResourceContext
   ): boolean {
+    // Evaluate all conditions (AND logic)
     return conditions.every(condition => {
+      const fieldValue = this.getFieldValue(condition.field, userContext, resourceContext);
+
       switch (condition.operator) {
         case 'equals':
-          return this.getFieldValue(condition.field, userContext, resourceContext) === condition.value;
-        
+          return fieldValue === condition.value;
         case 'not_equals':
-          return this.getFieldValue(condition.field, userContext, resourceContext) !== condition.value;
-        
+          return fieldValue !== condition.value;
         case 'in':
-          return Array.isArray(condition.value) && 
-                 condition.value.includes(this.getFieldValue(condition.field, userContext, resourceContext));
-        
+          return Array.isArray(condition.value) && condition.value.includes(fieldValue);
         case 'not_in':
-          return Array.isArray(condition.value) && 
-                 !condition.value.includes(this.getFieldValue(condition.field, userContext, resourceContext));
-        
+          return Array.isArray(condition.value) && !condition.value.includes(fieldValue);
         case 'owns':
-          return this.checkOwnership(condition.field, condition.value, userContext, resourceContext);
-        
+          return this.checkOwnership(condition.field, fieldValue, userContext, resourceContext);
         case 'belongs_to_tenant':
-          return resourceContext.tenantId === userContext.tenantId;
-        
+          return userContext.tenantId === resourceContext.tenantId;
         default:
-          console.warn(`Unknown condition operator: ${condition.operator}`);
+          logger.warn(`Unknown permission condition operator: ${condition.operator}`);
           return false;
       }
     });

@@ -21,6 +21,7 @@ import {
   ProvisioningEventType
 } from './types';
 import { CpanelPlugin } from './plugins/CpanelPlugin';
+import { encryptionService } from '../security/EncryptionService';
 
 export class ProvisioningManager extends EventEmitter {
   private static instance: ProvisioningManager;
@@ -156,7 +157,16 @@ export class ProvisioningManager extends EventEmitter {
         throw new ProviderConnectionError('Failed to connect to provider');
       }
 
-      // Create provider in database
+      // Encrypt sensitive data before storing
+      const encryptedConfig = data.config ? JSON.parse(JSON.stringify(data.config)) : {};
+      if (encryptedConfig.password) {
+        encryptedConfig.password = encryptionService.encrypt(encryptedConfig.password);
+      }
+      if (encryptedConfig.secret) {
+        encryptedConfig.secret = encryptionService.encrypt(encryptedConfig.secret);
+      }
+
+      // Create provider in database with encrypted credentials
       const [provider] = await db
         .insert(provisioningProviders)
         .values({
@@ -165,11 +175,11 @@ export class ProvisioningManager extends EventEmitter {
           hostname: data.hostname,
           port: data.port,
           username: data.username,
-          apiKey: data.apiKey, // TODO: Encrypt this
-          apiSecret: data.apiSecret, // TODO: Encrypt this
+          apiKey: data.apiKey ? encryptionService.encrypt(data.apiKey) : null,
+          apiSecret: data.apiSecret ? encryptionService.encrypt(data.apiSecret) : null,
           useSSL: data.useSSL ?? true,
           verifySSL: data.verifySSL ?? true,
-          config: data.config,
+          config: encryptedConfig,
           isActive: true,
           healthStatus: 'healthy',
           lastHealthCheck: new Date(),
@@ -211,15 +221,24 @@ export class ProvisioningManager extends EventEmitter {
       throw new ProvisioningError(`Plugin not found for type: ${providerData.type}`);
     }
 
+    // Decrypt sensitive data before creating adapter
+    const decryptedConfig = providerData.config ? JSON.parse(JSON.stringify(providerData.config)) : {};
+    if (decryptedConfig.password) {
+      decryptedConfig.password = encryptionService.decrypt(decryptedConfig.password);
+    }
+    if (decryptedConfig.secret) {
+      decryptedConfig.secret = encryptionService.decrypt(decryptedConfig.secret);
+    }
+
     const adapter = plugin.createAdapter({
       hostname: providerData.hostname,
       port: providerData.port,
       username: providerData.username || undefined,
-      apiKey: providerData.apiKey || undefined, // TODO: Decrypt
-      apiSecret: providerData.apiSecret || undefined, // TODO: Decrypt
+      apiKey: providerData.apiKey ? encryptionService.decrypt(providerData.apiKey) : undefined,
+      apiSecret: providerData.apiSecret ? encryptionService.decrypt(providerData.apiSecret) : undefined,
       useSSL: providerData.useSSL,
       verifySSL: providerData.verifySSL,
-      ...providerData.config
+      ...decryptedConfig
     });
 
     // Cache the adapter
@@ -435,7 +454,7 @@ export class ProvisioningManager extends EventEmitter {
       updateData.username = result.data.username;
     }
     if (result.data?.password) {
-      updateData.password = result.data.password; // TODO: Encrypt
+      updateData.password = encryptionService.encrypt(result.data.password);
     }
     if (result.data?.controlPanelUrl) {
       updateData.controlPanelUrl = result.data.controlPanelUrl;

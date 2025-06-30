@@ -31,6 +31,7 @@ export class JobProcessor {
 
       if (hasRedis) {
         // Register job processors only if Redis is available
+        this.registerEventWorker();
         this.registerSubscriptionRenewalProcessor();
         this.registerInvoiceGenerationProcessor();
         this.registerPaymentRetryProcessor();
@@ -244,6 +245,40 @@ export class JobProcessor {
     console.log('✅ Dunning management processor registered');
   }
 
+  private registerEventWorker(): void {
+    const redisConfig = {
+      host: process.env.REDIS_HOST || 'localhost',
+      port: parseInt(process.env.REDIS_PORT || '6379'),
+      password: process.env.REDIS_PASSWORD,
+    };
+
+    const worker = new Worker('events', async (job: Job) => {
+      const { type, payload, tenantId } = job.data;
+      console.log('---  ontvangen Event ---');
+      console.log(`✅ Received event [${type}] for tenant [${tenantId}]`);
+      console.log('Payload:', JSON.stringify(payload, null, 2));
+      console.log('---------------------');
+      // For now, we just log. In the future, this could trigger other services.
+      return { status: 'logged' };
+    }, {
+      connection: redisConfig,
+      concurrency: 10, // Can process multiple events concurrently
+    });
+
+    worker.on('completed', (job, result) => {
+      console.log(`Event job ${job.id} completed with result:`, result);
+    });
+
+    worker.on('failed', (job, err) => {
+      console.error(`Event job ${job?.id} failed:`, err);
+    });
+
+    const jobScheduler = JobScheduler.getInstance();
+    (jobScheduler as any).workers.set('events', worker);
+
+    console.log('✅ Event worker registered');
+  }
+
   async getJobStats(): Promise<Record<string, any>> {
     const jobScheduler = JobScheduler.getInstance();
     return await jobScheduler.getQueueStats();
@@ -269,6 +304,7 @@ export class JobProcessor {
   }
 
   private async markJobCompleted(jobId: string): Promise<void> {
+    if (!jobId) return;
     try {
       const { db } = await import('../../db');
       const { scheduledJobs } = await import('../../db/schema');

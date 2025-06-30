@@ -4,29 +4,109 @@ import { subscriptionService } from '../lib/subscription/SubscriptionService';
 import { dunningManager } from '../lib/subscription/DunningManager';
 import { jobScheduler } from '../lib/jobs/JobScheduler';
 import { db } from '../db';
-import { subscriptions, subscriptionStateChanges, dunningAttempts, clients } from '../db/schema';
+import { subscriptions, subscriptionStateChanges, dunningAttempts, clients, subscriptionComponents, components } from '../db/schema';
 import { eq, and, desc } from 'drizzle-orm';
 import { TRPCError } from '@trpc/server';
 
 export const subscriptionsRouter = router({
+  // Create a new subscription
+  create: adminProcedure
+    .input(z.object({
+      clientId: z.string().uuid(),
+      planId: z.string().uuid(),
+      productId: z.string().uuid().optional(),
+      paymentMethodId: z.string().optional(),
+      trialDays: z.number().min(0).max(365).optional(),
+      metadata: z.record(z.any()).optional(),
+    }))
+    .mutation(async ({ input, ctx }) => {
+      const result = await subscriptionService.createSubscription({
+        ...input,
+        tenantId: ctx.tenantId!,
+      });
+
+      if (!result.success) {
+        throw new TRPCError({
+          code: 'BAD_REQUEST',
+          message: result.error || 'Failed to create subscription',
+        });
+      }
+
+      return result.subscription;
+    }),
+
   // Get subscription details
   getById: adminProcedure
     .input(z.object({ id: z.string().uuid() }))
     .query(async ({ input, ctx }) => {
-      const [subscription] = await db
-        .select()
+      // Get subscription with components and their definitions
+      const subscriptionData = await db
+        .select({
+          subscription: {
+            id: subscriptions.id,
+            status: subscriptions.status,
+            planId: subscriptions.planId,
+            planName: subscriptions.planName,
+            currency: subscriptions.currency,
+            currentPeriodStart: subscriptions.currentPeriodStart,
+            currentPeriodEnd: subscriptions.currentPeriodEnd,
+            nextBillingDate: subscriptions.nextBillingDate,
+            cancelAtPeriodEnd: subscriptions.cancelAtPeriodEnd,
+            createdAt: subscriptions.createdAt,
+          },
+          component: {
+            id: subscriptionComponents.id,
+            name: subscriptionComponents.name,
+            description: subscriptionComponents.description,
+            quantity: subscriptionComponents.quantity,
+            unitPrice: subscriptionComponents.unitPrice,
+            provisioningStatus: subscriptionComponents.provisioningStatus,
+            componentId: subscriptionComponents.componentId,
+          },
+          definition: {
+            id: components.id,
+            name: components.name,
+            description: components.description,
+            type: components.type,
+            provider: components.provider,
+            features: components.features,
+            options: components.options,
+          }
+        })
         .from(subscriptions)
+        .leftJoin(
+          subscriptionComponents,
+          eq(subscriptionComponents.subscriptionId, subscriptions.id)
+        )
+        .leftJoin(
+          components,
+          eq(subscriptionComponents.componentId, components.id)
+        )
         .where(and(
           eq(subscriptions.id, input.id),
           eq(subscriptions.tenantId, ctx.tenantId!)
-        ))
-        .limit(1);
+        ));
 
-      if (!subscription) {
-        throw new Error('Subscription not found');
+      if (!subscriptionData.length) {
+        throw new TRPCError({
+          code: 'NOT_FOUND',
+          message: 'Subscription not found',
+        });
       }
 
-      return subscription;
+      // Group components with their definitions
+      const subscription = subscriptionData[0].subscription;
+      const subscribedComponents = subscriptionData
+        .filter(row => row.component.id) // Filter out null components
+        .map(row => ({
+          ...row.component,
+          definition: row.definition
+        }));
+
+      return {
+        ...subscription,
+        subscribedComponents
+      };
     }),
 
   // Get subscriptions for current client user
@@ -72,15 +152,75 @@ export const subscriptionsRouter = router({
         whereConditions.push(eq(subscriptions.status, status));
       }
 
-      const clientSubscriptions = await db
-        .select()
+      // Get subscriptions with their components and component definitions
+      const subscriptionData = await db
+        .select({
+          subscription: {
+            id: subscriptions.id,
+            status: subscriptions.status,
+            planId: subscriptions.planId,
+            planName: subscriptions.planName,
+            currency: subscriptions.currency,
+            currentPeriodStart: subscriptions.currentPeriodStart,
+            currentPeriodEnd: subscriptions.currentPeriodEnd,
+            nextBillingDate: subscriptions.nextBillingDate,
+            cancelAtPeriodEnd: subscriptions.cancelAtPeriodEnd,
+            createdAt: subscriptions.createdAt,
+          },
+          component: {
+            id: subscriptionComponents.id,
+            name: subscriptionComponents.name,
+            description: subscriptionComponents.description,
+            quantity: subscriptionComponents.quantity,
+            unitPrice: subscriptionComponents.unitPrice,
+            provisioningStatus: subscriptionComponents.provisioningStatus,
+            componentId: subscriptionComponents.componentId,
+          },
+          definition: {
+            id: components.id,
+            name: components.name,
+            description: components.description,
+            type: components.type,
+            provider: components.provider,
+            features: components.features,
+            options: components.options,
+          }
+        })
         .from(subscriptions)
+        .leftJoin(
+          subscriptionComponents,
+          eq(subscriptionComponents.subscriptionId, subscriptions.id)
+        )
+        .leftJoin(
+          components,
+          eq(subscriptionComponents.componentId, components.id)
+        )
         .where(and(...whereConditions))
         .orderBy(desc(subscriptions.createdAt))
         .limit(limit)
         .offset(offset);
 
-      return clientSubscriptions;
+      // Group subscriptions with their components
+      const subscriptionsMap = new Map();
+      
+      subscriptionData.forEach(row => {
+        if (!subscriptionsMap.has(row.subscription.id)) {
+          subscriptionsMap.set(row.subscription.id, {
+            ...row.subscription,
+            subscribedComponents: []
+          });
+        }
+
+        if (row.component.id) {
+          const subscription = subscriptionsMap.get(row.subscription.id);
+          subscription.subscribedComponents.push({
+            ...row.component,
+            definition: row.definition
+          });
+        }
+      });
+
+      return Array.from(subscriptionsMap.values());
     }),
 
   // List all subscriptions for tenant

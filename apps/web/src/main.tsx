@@ -4,6 +4,7 @@ import App from './App.tsx';
 import { TRPCProvider } from './providers/TRPCProvider.tsx';
 import { AuthProvider } from './hooks/useAuth.tsx';
 import './index.css';
+import './lib/i18n';
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>

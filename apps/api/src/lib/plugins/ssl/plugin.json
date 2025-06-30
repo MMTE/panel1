@@ -1,0 +1,48 @@
+{
+  "id": "ssl-plugin",
+  "name": "SSL Certificate Plugin",
+  "version": "1.0.0",
+  "description": "Manages SSL certificates through the component system",
+  "author": "Panel1 Team",
+  "tags": ["ssl", "security", "certificates"],
+  "defaultConfig": {
+    "enabled": true,
+    "defaultValidityPeriod": 365,
+    "defaultCertificateType": "domain_validated",
+    "autoRenewal": true,
+    "renewalThresholdDays": 30
+  },
+  "dependencies": {},
+  "hooks": [
+    {
+      "event": "certificate.issued",
+      "priority": 10
+    },
+    {
+      "event": "certificate.renewed",
+      "priority": 10
+    },
+    {
+      "event": "certificate.expiring",
+      "priority": 10
+    },
+    {
+      "event": "certificate.revoked",
+      "priority": 10
+    }
+  ],
+  "extensionPoints": [
+    {
+      "id": "ssl-validation-method",
+      "description": "Define custom SSL certificate validation methods",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "type": { "type": "string" },
+          "handler": { "type": "function" }
+        },
+        "required": ["type", "handler"]
+      }
+    }
+  ]
+} 

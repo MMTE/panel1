@@ -2,6 +2,7 @@
 export * from './users';
 export * from './tenants';
 export * from './clients';
+export * from './roles';
 export * from './plans';
 export * from './subscriptions';
 export * from './invoices';
@@ -17,3 +18,7 @@ export * from './support-tickets';
 export * from './domains';
 export * from './ssl-certificates';
 export * from './audit-logs';
+export * from './catalog';
+export * from './subscription-components';
+export * from './componentProviders';
+export * from './plugins';

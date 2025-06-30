@@ -1,0 +1,81 @@
+{
+  "id": "domain-plugin",
+  "name": "Domain Management Plugin",
+  "version": "1.0.0",
+  "description": "Manages domain registrations and DNS through the component system",
+  "author": "Panel1 Team",
+  "tags": ["domains", "dns", "registrar"],
+  "defaultConfig": {
+    "enabled": true,
+    "defaultTld": ".com",
+    "defaultRegistrationPeriod": 1,
+    "defaultAutoRenew": true,
+    "defaultPrivacyProtection": false,
+    "renewalReminderDays": 30,
+    "registrars": {
+      "namecheap": {
+        "enabled": true,
+        "sandbox": true
+      }
+    }
+  },
+  "dependencies": {},
+  "hooks": [
+    {
+      "event": "domain.registered",
+      "priority": 10
+    },
+    {
+      "event": "domain.transferred",
+      "priority": 10
+    },
+    {
+      "event": "domain.renewed",
+      "priority": 10
+    },
+    {
+      "event": "domain.expiring",
+      "priority": 10
+    },
+    {
+      "event": "domain.nameservers.updated",
+      "priority": 10
+    },
+    {
+      "event": "domain.contacts.updated",
+      "priority": 10
+    },
+    {
+      "event": "dns.record.updated",
+      "priority": 10
+    }
+  ],
+  "extensionPoints": [
+    {
+      "id": "domain-registrar",
+      "description": "Add support for additional domain registrars",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "name": { "type": "string" },
+          "handler": { "type": "function" },
+          "supportedTlds": { "type": "array", "items": { "type": "string" } }
+        },
+        "required": ["name", "handler", "supportedTlds"]
+      }
+    },
+    {
+      "id": "dns-provider",
+      "description": "Add support for additional DNS providers",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "name": { "type": "string" },
+          "handler": { "type": "function" },
+          "features": { "type": "array", "items": { "type": "string" } }
+        },
+        "required": ["name", "handler", "features"]
+      }
+    }
+  ]
+} 

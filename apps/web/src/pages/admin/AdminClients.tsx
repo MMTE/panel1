@@ -17,6 +17,7 @@ import {
 import { useAuth } from '../../hooks/useAuth';
 import { trpc } from '../../api/trpc';
 import { CreateClientModal } from '../../components/admin/CreateClientModal';
+import { Can, usePermissions } from '../../hooks/usePermissions';
 
 export function AdminClients() {
   const { user } = useAuth();
@@ -137,6 +138,7 @@ export function AdminClients() {
             <span>Refresh</span>
           </button>
           
+          <Can permission="client.create">
           <button
             onClick={() => setIsCreateModalOpen(true)}
             className="px-4 py-2 bg-gradient-to-r from-purple-500 to-pink-500 text-white rounded-lg hover:from-purple-600 hover:to-pink-600 transition-all duration-200 flex items-center space-x-2"
@@ -144,6 +146,7 @@ export function AdminClients() {
             <Plus className="w-4 h-4" />
             <span>Add Client</span>
           </button>
+          </Can>
         </div>
       </div>
 

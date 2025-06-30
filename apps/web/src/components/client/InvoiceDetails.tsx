@@ -8,7 +8,8 @@ import {
   AlertCircle,
   Download,
   Printer,
-  ExternalLink
+  ExternalLink,
+  Package
 } from 'lucide-react';
 import { ClientInvoice } from '../../hooks/useClientData';
 import { trpc } from '../../api/trpc';
@@ -22,11 +23,12 @@ interface InvoiceDetailsProps {
 export function InvoiceDetails({ invoice, onClose, onPay }: InvoiceDetailsProps) {
   const [isDownloading, setIsDownloading] = useState(false);
   
-  const formatCurrency = (amount: number) => {
+  const formatCurrency = (amount: number | string) => {
+    const numericAmount = typeof amount === 'string' ? parseFloat(amount) : amount;
     return new Intl.NumberFormat('en-US', {
       style: 'currency',
-      currency: 'USD'
-    }).format(amount);
+      currency: invoice.currency || 'USD'
+    }).format(numericAmount);
   };
 
   const formatDate = (dateString: string) => {
@@ -142,11 +144,11 @@ export function InvoiceDetails({ invoice, onClose, onPay }: InvoiceDetailsProps)
             <div className="bg-gray-50 rounded-lg p-4">
               <div className="flex justify-between mb-2">
                 <span className="text-gray-600">Subtotal</span>
-                <span className="font-medium">{formatCurrency(invoice.total)}</span>
+                <span className="font-medium">{formatCurrency(invoice.subtotal)}</span>
               </div>
               <div className="flex justify-between mb-2">
                 <span className="text-gray-600">Tax</span>
-                <span className="font-medium">{formatCurrency(0)}</span>
+                <span className="font-medium">{formatCurrency(invoice.tax)}</span>
               </div>
               <div className="flex justify-between pt-2 border-t border-gray-200">
                 <span className="font-medium text-gray-900">Total</span>
@@ -162,15 +164,29 @@ export function InvoiceDetails({ invoice, onClose, onPay }: InvoiceDetailsProps)
             <table className="w-full">
               <thead className="bg-gray-100">
                 <tr>
-                  <th className="text-left py-3 px-4 text-xs font-medium text-gray-500 uppercase tracking-wider">Description</th>
-                  <th className="text-right py-3 px-4 text-xs font-medium text-gray-500 uppercase tracking-wider">Amount</th>
+                  <th className="text-left py-3 px-4 text-xs font-medium text-gray-500 uppercase tracking-wider">Component</th>
+                  <th className="text-right py-3 px-4 text-xs font-medium text-gray-500 uppercase tracking-wider">Quantity</th>
+                  <th className="text-right py-3 px-4 text-xs font-medium text-gray-500 uppercase tracking-wider">Unit Price</th>
+                  <th className="text-right py-3 px-4 text-xs font-medium text-gray-500 uppercase tracking-wider">Total</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-200">
                 {invoice.items.map((item, index) => (
                   <tr key={index}>
-                    <td className="py-3 px-4 text-gray-800">{item.description}</td>
-                    <td className="py-3 px-4 text-right text-gray-800">{formatCurrency(item.amount)}</td>
+                    <td className="py-3 px-4">
+                      <div className="flex items-center space-x-2">
+                        <Package className="w-4 h-4 text-gray-400" />
+                        <div>
+                          <div className="text-gray-800 font-medium">{item.description}</div>
+                          {item.details && (
+                            <div className="text-sm text-gray-500">{item.details}</div>
+                          )}
+                        </div>
+                      </div>
+                    </td>
+                    <td className="py-3 px-4 text-right text-gray-800">{item.quantity}</td>
+                    <td className="py-3 px-4 text-right text-gray-800">{formatCurrency(item.unit_price)}</td>
+                    <td className="py-3 px-4 text-right text-gray-800">{formatCurrency(item.total)}</td>
                   </tr>
                 ))}
               </tbody>

@@ -1,8 +1,9 @@
 import { db } from '../../../db';
 type Database = typeof db;
 import { PaymentGateway, PaymentContext, HealthCheckResult } from '../interfaces/PaymentGateway';
-import { paymentGatewayConfigs, PaymentGatewayConfig } from '../../../db/schema';
-import { eq, and } from 'drizzle-orm';
+import { paymentGatewayConfigs, PaymentGatewayConfig, payments } from '../../../db/schema';
+import { eq, and, sql, count, sum } from 'drizzle-orm';
+import { encryptionService } from '../security/EncryptionService';
 
 /**
  * Payment Gateway Manager
@@ -128,15 +129,27 @@ export class PaymentGatewayManager {
       supportedCountries: string[];
     }
   ): Promise<PaymentGatewayConfig> {
-    const gateway = this.getGateway(gatewayName);
+    const gateway = this.gateways.get(gatewayName);
     if (!gateway) {
-      throw new Error(`Gateway ${gatewayName} is not registered`);
+      throw new Error(`Payment gateway '${gatewayName}' not found`);
     }
 
-    // Create or update gateway configuration
-    const existingConfig = await this.getGatewayConfig(tenantId, gatewayName);
-    
-    if (existingConfig) {
+    // Check if configuration already exists
+    const existingConfig = await this.db
+      .select()
+      .from(paymentGatewayConfigs)
+      .where(
+        and(
+          eq(paymentGatewayConfigs.tenantId, tenantId),
+          eq(paymentGatewayConfigs.gatewayName, gatewayName)
+        )
+      )
+      .limit(1);
+
+    // Encrypt the configuration before storing
+    const encryptedConfig = encryptionService.encrypt(JSON.stringify(config.config));
+
+    if (existingConfig.length > 0) {
       // Update existing configuration
       const [updatedConfig] = await this.db
         .update(paymentGatewayConfigs)
@@ -144,22 +157,18 @@ export class PaymentGatewayManager {
           displayName: config.displayName,
           isActive: config.isActive,
           priority: config.priority,
-          config: config.config,
+          config: encryptedConfig,
           supportedCurrencies: config.supportedCurrencies,
           supportedCountries: config.supportedCountries,
+          capabilities: gateway.capabilities,
           updatedAt: new Date(),
         })
-        .where(
-          and(
-            eq(paymentGatewayConfigs.tenantId, tenantId),
-            eq(paymentGatewayConfigs.gatewayName, gatewayName)
-          )
-        )
+        .where(eq(paymentGatewayConfigs.id, existingConfig[0].id))
         .returning();
-      
+
       // Refresh cached configurations
       await this.loadTenantConfigurations();
-      
+
       return updatedConfig;
     } else {
       // Create new configuration
@@ -171,7 +180,7 @@ export class PaymentGatewayManager {
           displayName: config.displayName,
           isActive: config.isActive,
           priority: config.priority,
-          config: config.config,
+          config: encryptedConfig,
           supportedCurrencies: config.supportedCurrencies,
           supportedCountries: config.supportedCountries,
           capabilities: gateway.capabilities,
@@ -283,20 +292,45 @@ export class PaymentGatewayManager {
   async getGatewayStats(tenantId: string): Promise<GatewayStats[]> {
     const configs = await this.getTenantGatewayConfigs(tenantId);
     
-    return configs.map(config => ({
+    const stats = await Promise.all(configs.map(async (config) => {
+      // Get payment statistics for this gateway
+      const paymentStats = await this.db
+        .select({
+          totalPayments: count(payments.id),
+          successfulPayments: count(sql`CASE WHEN ${payments.status} = 'completed' THEN 1 END`),
+          failedPayments: count(sql`CASE WHEN ${payments.status} = 'failed' THEN 1 END`),
+          totalAmount: sum(sql`CASE WHEN ${payments.status} = 'completed' THEN ${payments.amount} ELSE 0 END`),
+        })
+        .from(payments)
+        .where(
+          and(
+            eq(payments.tenantId, tenantId),
+            eq(payments.gatewayName, config.gatewayName)
+          )
+        );
+
+      const stats = paymentStats[0];
+      const totalPayments = Number(stats.totalPayments) || 0;
+      const successfulPayments = Number(stats.successfulPayments) || 0;
+      const totalAmount = Number(stats.totalAmount) || 0;
+      const successRate = totalPayments > 0 ? (successfulPayments / totalPayments) * 100 : 0;
+
+      return {
       gatewayName: config.gatewayName,
       displayName: config.displayName,
       isActive: config.isActive || false,
       status: config.status || 'INACTIVE',
       lastHealthCheck: config.lastHealthCheck,
       healthCheckStatus: config.healthCheckStatus,
-      // TODO: Add payment statistics from database
-      totalPayments: 0,
-      successfulPayments: 0,
-      failedPayments: 0,
-      totalAmount: 0,
-      successRate: 0,
+        totalPayments,
+        successfulPayments,
+        failedPayments: Number(stats.failedPayments) || 0,
+        totalAmount,
+        successRate: Math.round(successRate * 100) / 100, // Round to 2 decimal places
+      };
     }));
+
+    return stats;
   }
 }
 

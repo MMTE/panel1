@@ -2,6 +2,9 @@ import { z } from 'zod';
 import { router, adminProcedure, protectedProcedure } from '../trpc/trpc';
 import { permissionManager, Role, ResourceType, PermissionAction } from '../lib/auth/PermissionManager';
 import { TRPCError } from '@trpc/server';
+import { db } from '../db';
+import { permissionGroups, permissionGroupItems } from '../db/schema/roles';
+import { eq } from 'drizzle-orm';
 
 export const permissionsRouter = router({
   // Get all available permissions
@@ -26,6 +29,19 @@ export const permissionsRouter = router({
       const permissionIds = permissionManager.getRolePermissions(input.role);
       const permissions = permissionIds.map(id => permissionManager.getPermission(id)).filter(Boolean);
       
+      // Get permission groups that contain these permissions
+      const groups = await db.query.permissionGroups.findMany({
+        with: {
+          permissions: {
+            where: eq(permissionGroupItems.permissionId, permissionIds[0])
+          }
+        }
+      });
+
+      const relevantGroups = groups.filter(group => 
+        group.permissions.some(p => permissionIds.includes(p.permissionId))
+      );
+      
       return {
         role: input.role,
         permissions: permissions.map(permission => ({
@@ -34,6 +50,12 @@ export const permissionsRouter = router({
           action: permission!.action,
           description: permission!.description,
         })),
+        groups: relevantGroups.map(group => ({
+          id: group.id,
+          name: group.name,
+          description: group.description,
+          matchingPermissions: group.permissions.length
+        }))
       };
     }),
 
@@ -112,10 +134,29 @@ export const permissionsRouter = router({
         return groups;
       }, {} as Record<ResourceType, any[]>);
 
+      // Get permission groups for the user's permissions
+      const groups = await db.query.permissionGroups.findMany({
+        with: {
+          permissions: {
+            where: eq(permissionGroupItems.permissionId, permissionIds[0])
+          }
+        }
+      });
+
+      const userGroups = groups.filter(group => 
+        group.permissions.some(p => permissionIds.includes(p.permissionId))
+      );
+
       return {
         role,
         totalPermissions: permissions.length,
         permissions: groupedPermissions,
+        groups: userGroups.map(group => ({
+          id: group.id,
+          name: group.name,
+          description: group.description,
+          matchingPermissions: group.permissions.length
+        }))
       };
     }),
 
@@ -134,6 +175,15 @@ export const permissionsRouter = router({
         });
       }
 
+      // Get groups containing this permission
+      const groups = await db.query.permissionGroups.findMany({
+        with: {
+          permissions: {
+            where: eq(permissionGroupItems.permissionId, input.permissionId)
+          }
+        }
+      });
+
       return {
         id: permission.id,
         resource: permission.resource,
@@ -143,6 +193,11 @@ export const permissionsRouter = router({
         rolesWithPermission: permissionManager.getAvailableRoles().filter(role =>
           permissionManager.getRolePermissions(role).includes(permission.id)
         ),
+        groups: groups.map(group => ({
+          id: group.id,
+          name: group.name,
+          description: group.description
+        }))
       };
     }),
 

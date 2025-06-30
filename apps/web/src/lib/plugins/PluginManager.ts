@@ -86,14 +86,27 @@ export class PluginManager {
    * Get plugin info
    */
   getPluginInfo(name: string): PluginInfo | undefined {
-    return pluginRegistry.getPluginInfo(name);
+    const plugin = pluginRegistry.get(name);
+    return plugin ? {
+      name: plugin.metadata.name,
+      version: plugin.metadata.version,
+      description: plugin.metadata.description,
+      status: plugin.status,
+      isEnabled: plugin.status === 'enabled' && plugin.instance !== null
+    } : undefined;
   }
 
   /**
    * Get all plugin info
    */
   getAllPluginInfo(): PluginInfo[] {
-    return pluginRegistry.getAllPluginInfo();
+    return this.getAllPlugins().map(plugin => ({
+      name: plugin.metadata.name,
+      version: plugin.metadata.version,
+      description: plugin.metadata.description,
+      status: plugin.status,
+      isEnabled: plugin.status === 'enabled' && plugin.instance !== null
+    }));
   }
 
   /**

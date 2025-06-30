@@ -43,6 +43,7 @@ export class JobScheduler {
       await this.testRedisConnection();
       
       // Initialize job queues
+      this.createQueue('events'); // Central event bus queue
       this.createQueue('subscription-renewal');
       this.createQueue('invoice-generation');
       this.createQueue('payment-retry');

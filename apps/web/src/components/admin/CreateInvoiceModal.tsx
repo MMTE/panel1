@@ -11,6 +11,7 @@ import {
 } from 'lucide-react';
 import { trpc } from '../../api/trpc';
 import { useClients } from '../../hooks/useClients';
+import { TRPCClientError } from '@trpc/client';
 
 interface CreateInvoiceModalProps {
   isOpen: boolean;
@@ -36,24 +37,35 @@ const initialFormData: InvoiceFormData = {
   clientId: '',
   items: [{ description: '', quantity: 1, unitPrice: 0 }],
   tax: 0,
-  dueDate: '',
+  dueDate: new Date().toISOString().split('T')[0],
   notes: '',
 };
 
+type FieldErrors = { [key: string]: string | undefined };
+
 export function CreateInvoiceModal({ isOpen, onClose, onSuccess }: CreateInvoiceModalProps) {
   const [formData, setFormData] = useState<InvoiceFormData>(initialFormData);
-  const [errors, setErrors] = useState<any>({});
+  const [errors, setErrors] = useState<FieldErrors>({});
   const [submitError, setSubmitError] = useState<string | null>(null);
 
   const { clients } = useClients();
   const createInvoice = trpc.invoices.create.useMutation({
     onSuccess: () => {
       onSuccess();
-      onClose();
-      resetForm();
+      handleClose();
     },
     onError: (error) => {
-      setSubmitError(error.message || 'Failed to create invoice');
+      if (error instanceof TRPCClientError && error.data?.code === 'BAD_REQUEST' && error.data.zodError) {
+        const fieldErrors = error.data.zodError as { [key: string]: string[] };
+        const newErrors: FieldErrors = {};
+        for (const [key, value] of Object.entries(fieldErrors)) {
+          newErrors[key] = value[0];
+        }
+        setErrors(newErrors);
+        setSubmitError('Please correct the errors below.');
+      } else {
+        setSubmitError(error.message || 'An unexpected error occurred.');
+      }
     },
   });
 
@@ -71,22 +83,40 @@ export function CreateInvoiceModal({ isOpen, onClose, onSuccess }: CreateInvoice
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setSubmitError(null);
+    setErrors({});
 
     try {
       await createInvoice.mutateAsync({
         clientId: formData.clientId,
         items: formData.items.map(item => ({
-          description: item.description.trim(),
-          quantity: item.quantity,
-          unitPrice: item.unitPrice,
+          ...item,
+          unitPrice: item.unitPrice.toFixed(2),
         })),
-        tax: formData.tax,
+        tax: formData.tax.toFixed(2),
         dueDate: new Date(formData.dueDate),
         notes: formData.notes?.trim() || undefined,
       });
-    } catch (error) {
-      // Error handled by onError callback
+    } catch (err) {
+      // Errors are handled by the onError callback of useMutation
     }
+  };
+
+  const getFieldError = (field: string) => errors[field];
+  
+  const getItemError = (index: number, field: keyof InvoiceItem) => {
+    const key = `items[${index}].${field}`;
+    // This is a simplification. For more complex item errors, a better mapping would be needed.
+    return Object.entries(errors).find(([k,v]) => k.startsWith(`items.${index}`))?.[1];
+  };
+
+  // Format date string to YYYY-MM-DD for input type="date"
+  const formatDateForInput = (dateString: string) => {
+    if (!dateString) return '';
+    
+    const date = new Date(dateString);
+    if (isNaN(date.getTime())) return dateString;
+    
+    return date.toISOString().split('T')[0];
   };
 
   const addItem = () => {
@@ -153,7 +183,7 @@ export function CreateInvoiceModal({ isOpen, onClose, onSuccess }: CreateInvoice
               <select
                 value={formData.clientId}
                 onChange={(e) => setFormData(prev => ({ ...prev, clientId: e.target.value }))}
-                className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                className={`w-full border ${getFieldError('clientId') ? 'border-red-300' : 'border-gray-300'} rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-transparent`}
                 required
               >
                 <option value="">Select a client</option>
@@ -163,19 +193,28 @@ export function CreateInvoiceModal({ isOpen, onClose, onSuccess }: CreateInvoice
                   </option>
                 ))}
               </select>
+              {getFieldError('clientId') && (
+                <p className="mt-1 text-sm text-red-600">{getFieldError('clientId')}</p>
+              )}
             </div>
 
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-2">
                 Due Date *
               </label>
-              <input
-                type="date"
-                value={formData.dueDate}
-                onChange={(e) => setFormData(prev => ({ ...prev, dueDate: e.target.value }))}
-                className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                required
-              />
+              <div className="relative">
+                <Calendar className="absolute left-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-gray-400" />
+                <input
+                  type="date"
+                  value={formatDateForInput(formData.dueDate)}
+                  onChange={(e) => setFormData(prev => ({ ...prev, dueDate: e.target.value }))}
+                  className={`w-full border ${getFieldError('dueDate') ? 'border-red-300' : 'border-gray-300'} rounded-lg pl-10 pr-4 py-2 focus:ring-2 focus:ring-blue-500 focus:border-transparent`}
+                  required
+                />
+              </div>
+              {getFieldError('dueDate') && (
+                <p className="mt-1 text-sm text-red-600">{getFieldError('dueDate')}</p>
+              )}
             </div>
           </div>
 
@@ -195,7 +234,7 @@ export function CreateInvoiceModal({ isOpen, onClose, onSuccess }: CreateInvoice
 
             <div className="space-y-4">
               {formData.items.map((item, index) => (
-                <div key={index} className="p-4 border border-gray-200 rounded-lg">
+                <div key={index} className={`p-4 border ${getItemError(index, 'description') ? 'border-red-200 bg-red-50' : 'border-gray-200'} rounded-lg`}>
                   <div className="grid grid-cols-1 md:grid-cols-5 gap-4 items-center">
                     <div className="md:col-span-2">
                       <input
@@ -247,6 +286,9 @@ export function CreateInvoiceModal({ isOpen, onClose, onSuccess }: CreateInvoice
                       )}
                     </div>
                   </div>
+                  {getItemError(index, 'description') && (
+                    <p className="mt-2 text-sm text-red-600">{getItemError(index, 'description')}</p>
+                  )}
                 </div>
               ))}
             </div>
@@ -265,9 +307,12 @@ export function CreateInvoiceModal({ isOpen, onClose, onSuccess }: CreateInvoice
                 step="0.01"
                 value={formData.tax}
                 onChange={(e) => setFormData(prev => ({ ...prev, tax: parseFloat(e.target.value) || 0 }))}
-                className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                className={`w-full border ${getFieldError('tax') ? 'border-red-300' : 'border-gray-300'} rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-transparent`}
                 placeholder="0.00"
               />
+              {getFieldError('tax') && (
+                <p className="mt-1 text-sm text-red-600">{getFieldError('tax')}</p>
+              )}
             </div>
 
             <div className="flex items-end">

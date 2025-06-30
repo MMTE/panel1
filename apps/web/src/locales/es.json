@@ -1,0 +1,29 @@
+{
+  "common": {
+    "language": "Idioma",
+    "languages": {
+      "en": "Inglés",
+      "es": "Español"
+    },
+    "actions": {
+      "save": "Guardar",
+      "cancel": "Cancelar",
+      "delete": "Eliminar",
+      "edit": "Editar",
+      "create": "Crear",
+      "search": "Buscar"
+    },
+    "navigation": {
+      "dashboard": "Panel",
+      "clients": "Clientes",
+      "invoices": "Facturas",
+      "support": "Soporte",
+      "settings": "Configuración"
+    },
+    "auth": {
+      "signIn": "Iniciar Sesión",
+      "signOut": "Cerrar Sesión",
+      "profile": "Perfil"
+    }
+  }
+} 

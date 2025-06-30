@@ -324,4 +324,116 @@ export const analyticsRouter = router({
         });
       }
     }),
+
+  getRecentActivity: adminProcedure
+    .input(z.object({
+      period: z.enum(['7d', '30d', '90d', '1y']).default('30d'),
+    }))
+    .query(async ({ input, ctx }) => {
+      try {
+        const now = new Date();
+        const periodDays = {
+          '7d': 7,
+          '30d': 30,
+          '90d': 90,
+          '1y': 365,
+        }[input.period];
+
+        const startDate = new Date(now.getTime() - periodDays * 24 * 60 * 60 * 1000);
+
+        // Get recent payments and subscription changes
+        const recentPayments = await db
+          .select({
+            type: sql<string>`'payment'`,
+            description: sql<string>`CONCAT('Payment received for ', ${subscriptions.planName})`,
+            customer: sql<string>`${clients.name}`,
+            amount: payments.amount,
+            createdAt: payments.createdAt,
+          })
+          .from(payments)
+          .leftJoin(subscriptions, eq(payments.subscriptionId, subscriptions.id))
+          .leftJoin(clients, eq(subscriptions.clientId, clients.id))
+          .where(and(
+            eq(payments.tenantId, ctx.tenantId),
+            eq(payments.status, 'COMPLETED'),
+            gte(payments.createdAt, startDate)
+          ))
+          .orderBy(desc(payments.createdAt))
+          .limit(10);
+
+        return {
+          recentActivity: recentPayments.map(activity => ({
+            type: activity.type,
+            description: activity.description,
+            customer: activity.customer,
+            amount: activity.amount,
+            time: activity.createdAt.toISOString(),
+          })),
+        };
+      } catch (error) {
+        throw new TRPCError({
+          code: 'INTERNAL_SERVER_ERROR',
+          message: 'Failed to fetch recent activity',
+          cause: error,
+        });
+      }
+    }),
+
+  getCustomerSegments: adminProcedure
+    .input(z.object({
+      period: z.enum(['7d', '30d', '90d', '1y']).default('30d'),
+    }))
+    .query(async ({ input, ctx }) => {
+      try {
+        const now = new Date();
+        const periodDays = {
+          '7d': 7,
+          '30d': 30,
+          '90d': 90,
+          '1y': 365,
+        }[input.period];
+
+        const startDate = new Date(now.getTime() - periodDays * 24 * 60 * 60 * 1000);
+
+        // Get customer segments based on subscription plans
+        const segments = await db
+          .select({
+            segment: sql<string>`COALESCE(${subscriptions.planName}, 'No Plan')`,
+            count: sql<number>`COUNT(DISTINCT ${clients.id})`,
+            revenue: sql<number>`COALESCE(SUM(${payments.amount}), 0)`,
+          })
+          .from(clients)
+          .leftJoin(subscriptions, and(
+            eq(subscriptions.clientId, clients.id),
+            eq(subscriptions.status, 'ACTIVE')
+          ))
+          .leftJoin(payments, and(
+            eq(payments.clientId, clients.id),
+            eq(payments.status, 'COMPLETED'),
+            gte(payments.createdAt, startDate)
+          ))
+          .where(eq(clients.tenantId, ctx.tenantId))
+          .groupBy(subscriptions.planName)
+          .orderBy(desc(sql`COUNT(DISTINCT ${clients.id})`));
+
+        // Calculate total customers and revenue for percentage calculations
+        const totalCustomers = segments.reduce((sum, seg) => sum + Number(seg.count), 0);
+        const totalRevenue = segments.reduce((sum, seg) => sum + Number(seg.revenue), 0);
+
+        return {
+          customerSegments: segments.map(segment => ({
+            segment: segment.segment,
+            count: Number(segment.count),
+            revenue: Number(segment.revenue),
+            percentage: totalCustomers > 0 ? Math.round((Number(segment.count) / totalCustomers) * 100) : 0,
+          })),
+        };
+      } catch (error) {
+        throw new TRPCError({
+          code: 'INTERNAL_SERVER_ERROR',
+          message: 'Failed to fetch customer segments',
+          cause: error,
+        });
+      }
+    }),
 }); 

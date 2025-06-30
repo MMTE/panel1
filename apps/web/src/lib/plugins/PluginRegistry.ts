@@ -1,525 +1,263 @@
-// import { supabase } from '../supabase'; // TODO: Replace with tRPC
-import { auditLogger } from '../audit/AuditLogger';
-import { eventEmitter } from '../events/EventEmitter';
-import type {
-  Plugin,
-  PluginRegistryInterface,
-  PluginContext,
-  PluginInfo,
-  PluginStatus,
-  Panel1EventMap,
-  PluginError,
-  PluginValidationError,
-  PluginDependencyError,
-} from '@panel1/plugin-sdk';
+import { trpc } from '../../api/trpc';
+import { Plugin, PluginMetadata, PluginConfig, PluginStatus } from './types';
 
-export class PluginRegistry implements PluginRegistryInterface {
-  private plugins: Map<string, Plugin> = new Map();
-  private pluginInfo: Map<string, PluginInfo> = new Map();
-  private enabledPlugins: Set<string> = new Set();
-  private eventQueue: Array<{ hook: keyof Panel1EventMap; payload: any }> = [];
-  private processing = false;
+class PluginRegistry {
+  private static instance: PluginRegistry;
+  private trpcClient: typeof trpc;
+  private installedPlugins: Map<string, Plugin> = new Map();
 
-  constructor() {
-    this.loadInstalledPlugins();
+  private constructor() {
+    this.trpcClient = trpc;
+  }
+
+  public static getInstance(): PluginRegistry {
+    if (!PluginRegistry.instance) {
+      PluginRegistry.instance = new PluginRegistry();
+    }
+    return PluginRegistry.instance;
   }
 
   /**
-   * Load all installed plugins from the database
+   * Initialize the plugin registry
    */
-  private async loadInstalledPlugins(): Promise<void> {
+  public async initialize(): Promise<void> {
     try {
-      // TODO: Replace with tRPC call when plugin management system is ready
-      // console.log('TODO: Load installed plugins from database');
-      const installedPlugins: any[] = []; // Use empty array for now
-
-      for (const pluginData of installedPlugins || []) {
-        try {
-          // Load plugin module dynamically
-          const plugin = await this.loadPluginModule(pluginData.name, pluginData.source);
-          if (plugin) {
-            this.plugins.set(pluginData.name, plugin);
-            this.pluginInfo.set(pluginData.name, {
-              metadata: plugin.metadata,
-              status: pluginData.enabled ? 'enabled' : 'disabled',
-              installedAt: new Date(pluginData.installed_at),
-              enabledAt: pluginData.enabled_at ? new Date(pluginData.enabled_at) : undefined,
-            });
-
-            if (pluginData.enabled) {
-              this.enabledPlugins.add(pluginData.name);
-              // Call onEnable lifecycle method
-              await this.callLifecycleMethod(plugin, 'onEnable');
-            }
-          }
-        } catch (error) {
-          console.error(`Failed to load plugin ${pluginData.name}:`, error);
-          this.pluginInfo.set(pluginData.name, {
-            metadata: { name: pluginData.name } as any,
-            status: 'error',
-            error: error instanceof Error ? error.message : 'Unknown error',
-            installedAt: new Date(pluginData.installed_at),
-          });
-        }
+      const plugins = await this.trpcClient.plugins.listPlugins.query();
+      
+      // Clear existing plugins
+      this.installedPlugins.clear();
+      
+      // Load each plugin
+      for (const plugin of plugins) {
+        await this.loadPlugin(plugin);
       }
     } catch (error) {
-      console.error('Failed to load plugins:', error);
+      console.error('Failed to initialize plugin registry:', error);
+      throw error;
     }
   }
 
   /**
-   * Dynamically load a plugin module
+   * Load a plugin into the registry
    */
-  private async loadPluginModule(name: string, source: string): Promise<Plugin | null> {
+  private async loadPlugin(pluginData: any): Promise<void> {
     try {
-      // In a real implementation, this would load the plugin from the filesystem
-      // or from a remote source. For now, we'll simulate this.
-      
-      // This would be something like:
-      // const module = await import(`/plugins/${name}/dist/index.js`);
-      // return module.default;
-      
-      console.warn(`Plugin loading not fully implemented for ${name} from ${source}`);
-      return null;
-    } catch (error) {
-      throw new PluginError(`Failed to load plugin module: ${error}`, name);
-    }
-  }
-
-  /**
-   * Register a plugin in the registry
-   */
-  async register(plugin: Plugin): Promise<void> {
-    const { name } = plugin.metadata;
-
-    // Validate plugin
-    this.validatePlugin(plugin);
-
-    // Check dependencies
-    await this.checkDependencies(plugin);
-
-    // Store plugin
-    this.plugins.set(name, plugin);
-    this.pluginInfo.set(name, {
-      metadata: plugin.metadata,
-      status: 'installed',
-      installedAt: new Date(),
-    });
-
-    // Save to database
-    await this.savePluginToDatabase(plugin, 'installed');
-
-    // Call onInstall lifecycle method
-    await this.callLifecycleMethod(plugin, 'onInstall');
-
-    // Log plugin installation
-    await auditLogger.logPluginAction('install', name, plugin.metadata);
-
-    // Emit plugin installed event
-    await this.executeHook('plugin.installed', { plugin: name, context: this.createContext(name) });
-  }
-
-  /**
-   * Unregister a plugin from the registry
-   */
-  async unregister(name: string): Promise<void> {
-    const plugin = this.plugins.get(name);
-    if (!plugin) {
-      throw new PluginError(`Plugin ${name} not found`, name);
-    }
-
-    // Disable if enabled
-    if (this.enabledPlugins.has(name)) {
-      await this.disable(name);
-    }
-
-    // Call onUninstall lifecycle method
-    await this.callLifecycleMethod(plugin, 'onUninstall');
-
-    // Remove from registry
-    this.plugins.delete(name);
-    this.pluginInfo.delete(name);
-
-    // TODO: Replace with tRPC calls
-    console.log('TODO: Remove plugin from database', name);
-
-    // Log plugin uninstallation
-    await auditLogger.logPluginAction('uninstall', name);
-
-    // Emit plugin uninstalled event
-    await this.executeHook('plugin.uninstalled', { plugin: name, context: this.createContext(name) });
-  }
-
-  /**
-   * Get a specific plugin
-   */
-  get(name: string): Plugin | undefined {
-    return this.plugins.get(name);
-  }
-
-  /**
-   * Get all registered plugins
-   */
-  getAll(): Plugin[] {
-    return Array.from(this.plugins.values());
-  }
-
-  /**
-   * Get all enabled plugins
-   */
-  getEnabled(): Plugin[] {
-    return Array.from(this.enabledPlugins)
-      .map(name => this.plugins.get(name))
-      .filter((plugin): plugin is Plugin => plugin !== undefined);
-  }
-
-  /**
-   * Check if a plugin is enabled
-   */
-  isEnabled(name: string): boolean {
-    return this.enabledPlugins.has(name);
-  }
-
-  /**
-   * Enable a plugin
-   */
-  async enable(name: string): Promise<void> {
-    const plugin = this.plugins.get(name);
-    if (!plugin) {
-      throw new PluginError(`Plugin ${name} not found`, name);
-    }
-
-    if (this.enabledPlugins.has(name)) {
-      return; // Already enabled
-    }
-
-    // Check dependencies
-    await this.checkDependencies(plugin);
-
-    // Enable plugin
-    this.enabledPlugins.add(name);
-
-    // TODO: Replace with tRPC call
-    console.log('TODO: Update plugin enabled status in database', name);
-
-    // Update plugin info
-    const info = this.pluginInfo.get(name);
-    if (info) {
-      info.status = 'enabled';
-      info.enabledAt = new Date();
-    }
-
-    // Call onEnable lifecycle method
-    await this.callLifecycleMethod(plugin, 'onEnable');
-
-    // Log plugin enablement
-    await auditLogger.logPluginAction('enable', name);
-
-    // Emit plugin enabled event
-    await this.executeHook('plugin.enabled', { plugin: name, context: this.createContext(name) });
-  }
-
-  /**
-   * Disable a plugin
-   */
-  async disable(name: string): Promise<void> {
-    const plugin = this.plugins.get(name);
-    if (!plugin) {
-      throw new PluginError(`Plugin ${name} not found`, name);
-    }
-
-    if (!this.enabledPlugins.has(name)) {
-      return; // Already disabled
-    }
-
-    // Call onDisable lifecycle method
-    await this.callLifecycleMethod(plugin, 'onDisable');
-
-    // Disable plugin
-    this.enabledPlugins.delete(name);
-
-    // TODO: Replace with tRPC call
-    console.log('TODO: Update plugin disabled status in database', name);
-
-    // Update plugin info
-    const info = this.pluginInfo.get(name);
-    if (info) {
-      info.status = 'disabled';
-      info.enabledAt = undefined;
-    }
-
-    // Log plugin disablement
-    await auditLogger.logPluginAction('disable', name);
-
-    // Emit plugin disabled event
-    await this.executeHook('plugin.disabled', { plugin: name, context: this.createContext(name) });
-  }
-
-  /**
-   * Install a plugin from a source
-   */
-  async install(name: string, source: string): Promise<void> {
-    try {
-      // Load plugin from source
-      const plugin = await this.loadPluginModule(name, source);
-      if (!plugin) {
-        throw new PluginError(`Failed to load plugin from source: ${source}`, name);
+      // Validate plugin metadata
+      if (!this.validatePluginMetadata(pluginData.metadata)) {
+        throw new Error(`Invalid plugin metadata for ${pluginData.metadata.name}`);
       }
 
-      // Register the plugin
-      await this.register(plugin);
+      // Create plugin instance
+      const plugin: Plugin = {
+        id: pluginData.id,
+        metadata: pluginData.metadata,
+        status: pluginData.status || 'disabled',
+        config: pluginData.config || {},
+        instance: null // Will be set when the plugin is enabled
+      };
+
+      // Store in registry
+      this.installedPlugins.set(plugin.metadata.name, plugin);
+
+      // If plugin should be enabled, enable it
+      if (plugin.status === 'enabled') {
+        await this.enablePlugin(plugin.metadata.name);
+      }
     } catch (error) {
-      throw new PluginError(
-        `Failed to install plugin ${name}: ${error}`,
-        name
-      );
+      console.error(`Failed to load plugin ${pluginData.metadata?.name}:`, error);
+      throw error;
+    }
+  }
+
+  /**
+   * Install a new plugin
+   */
+  public async installPlugin(pluginPackage: ArrayBuffer, options: { enable?: boolean } = {}): Promise<void> {
+    try {
+      const formData = new FormData();
+      formData.append('plugin', new Blob([pluginPackage]));
+      formData.append('options', JSON.stringify(options));
+
+      const result = await this.trpcClient.plugins.installPlugin.mutate({
+        plugin: formData
+      });
+
+      if (result.success) {
+        await this.loadPlugin(result.plugin);
+      }
+    } catch (error) {
+      console.error('Failed to install plugin:', error);
+      throw error;
     }
   }
 
   /**
    * Uninstall a plugin
    */
-  async uninstall(name: string): Promise<void> {
-    await this.unregister(name);
-  }
+  public async uninstallPlugin(name: string): Promise<void> {
+    try {
+      const plugin = this.installedPlugins.get(name);
+      if (!plugin) {
+        throw new Error(`Plugin ${name} not found`);
+      }
 
-  /**
-   * Execute a hook across all enabled plugins
-   */
-  async executeHook<K extends keyof Panel1EventMap>(
-    hook: K,
-    payload: Parameters<Panel1EventMap[K]>[0]
-  ): Promise<void> {
-    // Add to event queue
-    this.eventQueue.push({ hook, payload });
-
-    // Process queue if not already processing
-    if (!this.processing) {
-      await this.processEventQueue();
-    }
-  }
-
-  /**
-   * Process the event queue
-   */
-  private async processEventQueue(): Promise<void> {
-    this.processing = true;
-
-    while (this.eventQueue.length > 0) {
-      const event = this.eventQueue.shift();
-      if (!event) continue;
-
-      const { hook, payload } = event;
-
-      // Get all enabled plugins that have this hook
-      const pluginsWithHook = this.getEnabled().filter(
-        plugin => plugin.hooks && plugin.hooks[hook]
-      );
-
-      // Execute hooks in parallel
-      const promises = pluginsWithHook.map(async (plugin) => {
-        try {
-          const handler = plugin.hooks![hook];
-          if (handler) {
-            await handler(payload);
-          }
-        } catch (error) {
-          console.error(`Error executing hook ${hook} for plugin ${plugin.metadata.name}:`, error);
-          
-          // Log error to database
-          await this.logPluginError(plugin.metadata.name, hook, error);
-        }
+      await this.trpcClient.plugins.uninstallPlugin.mutate({
+        id: plugin.id
       });
 
-      await Promise.allSettled(promises);
-    }
-
-    this.processing = false;
-  }
-
-  /**
-   * Validate a plugin
-   */
-  private validatePlugin(plugin: Plugin): void {
-    try {
-      // Validate metadata
-      if (!plugin.metadata || !plugin.metadata.name || !plugin.metadata.version) {
-        throw new PluginValidationError('Plugin metadata is invalid', plugin.metadata?.name || 'unknown');
-      }
-
-      // Validate config schema if provided
-      if (plugin.configSchema) {
-        // Zod schema validation happens automatically
-      }
-
-      // Validate hooks
-      if (plugin.hooks) {
-        for (const hookName of Object.keys(plugin.hooks)) {
-          if (typeof plugin.hooks[hookName as keyof Panel1EventMap] !== 'function') {
-            throw new PluginValidationError(`Hook ${hookName} must be a function`, plugin.metadata.name);
-          }
-        }
-      }
-
-      // Validate routes
-      if (plugin.routes) {
-        for (const route of Object.keys(plugin.routes)) {
-          if (typeof plugin.routes[route] !== 'function') {
-            throw new PluginValidationError(`Route ${route} must be a function`, plugin.metadata.name);
-          }
-        }
-      }
-
+      this.installedPlugins.delete(name);
     } catch (error) {
-      if (error instanceof PluginValidationError) {
-        throw error;
-      }
-      throw new PluginValidationError(`Plugin validation failed: ${error}`, plugin.metadata?.name || 'unknown');
-    }
-  }
-
-  /**
-   * Check plugin dependencies
-   */
-  private async checkDependencies(plugin: Plugin): Promise<void> {
-    if (!plugin.metadata.dependencies) {
-      return;
-    }
-
-    for (const [depName, depVersion] of Object.entries(plugin.metadata.dependencies)) {
-      const depPlugin = this.plugins.get(depName);
-      
-      if (!depPlugin) {
-        throw new PluginDependencyError(
-          `Required dependency ${depName} is not installed`,
-          plugin.metadata.name
-        );
-      }
-
-      if (!this.enabledPlugins.has(depName)) {
-        throw new PluginDependencyError(
-          `Required dependency ${depName} is not enabled`,
-          plugin.metadata.name
-        );
-      }
-
-      // TODO: Implement semantic version checking
-      // if (!semver.satisfies(depPlugin.metadata.version, depVersion)) {
-      //   throw new PluginDependencyError(
-      //     `Dependency ${depName} version ${depPlugin.metadata.version} does not satisfy ${depVersion}`,
-      //     plugin.metadata.name
-      //   );
-      // }
-    }
-  }
-
-  /**
-   * Call a lifecycle method on a plugin
-   */
-  private async callLifecycleMethod(
-    plugin: Plugin,
-    method: 'onInstall' | 'onEnable' | 'onDisable' | 'onUninstall'
-  ): Promise<void> {
-    try {
-      const lifecycleMethod = plugin[method];
-      if (lifecycleMethod) {
-        const context = this.createContext(plugin.metadata.name);
-        await lifecycleMethod(context);
-      }
-    } catch (error) {
-      console.error(`Error calling ${method} for plugin ${plugin.metadata.name}:`, error);
-      await this.logPluginError(plugin.metadata.name, method, error);
+      console.error(`Failed to uninstall plugin ${name}:`, error);
       throw error;
     }
   }
 
   /**
-   * Create a plugin context
+   * Enable a plugin
    */
-  createContext(pluginId: string): PluginContext {
-    return {
-      pluginId,
-      logger: {
-        info: (...args) => console.log(`[${pluginId}]`, ...args),
-        warn: (...args) => console.warn(`[${pluginId}]`, ...args),
-        error: (...args) => console.error(`[${pluginId}]`, ...args),
-        debug: (...args) => console.debug(`[${pluginId}]`, ...args),
-      },
-      // supabase, // TODO: Replace with tRPC
-      eventEmitter,
-      auditLogger,
-      async getPluginConfig<T>(id: string): Promise<T> {
-        // TODO: Replace with tRPC call
-        console.log('TODO: Get plugin config', id);
-        return {} as T;
-      },
-      async setPluginConfig<T>(id: string, config: Partial<T>): Promise<void> {
-        // TODO: Replace with tRPC call
-        console.log('TODO: Set plugin config', id, config);
-        // Log configuration change
-        await auditLogger.logPluginAction('configure', id, config);
-      },
-      async createSettings<T>(settings: T): Promise<void> {
-        // TODO: Replace with tRPC call
-        console.log('TODO: Create plugin settings', pluginId, settings);
-      },
-      async deleteSettings(): Promise<void> {
-        // TODO: Replace with tRPC call
-        console.log('TODO: Delete plugin settings', pluginId);
-      },
-      translate: (key: string, replacements?: Record<string, string>) => {
-        // TODO: Implement i18n translation
-        let translated = key;
-        if (replacements) {
-          for (const [placeholder, value] of Object.entries(replacements)) {
-            translated = translated.replace(`{${placeholder}}`, value);
-          }
-        }
-        return translated;
-      },
-      async emit(eventName: string, data: any): Promise<void> {
-        await eventEmitter.emit(eventName as keyof Panel1EventMap, data, {
-          entityType: 'plugin',
-          entityId: pluginId,
-        });
-      },
-    };
-  }
-
-  /**
-   * Save plugin to database
-   */
-  private async savePluginToDatabase(plugin: Plugin, status: PluginStatus): Promise<void> {
-    // TODO: Replace with tRPC call
-    console.log('TODO: Save plugin to database', plugin.metadata.name, status);
-  }
-
-  /**
-   * Log plugin error to database
-   */
-  private async logPluginError(pluginId: string, operation: string, error: any): Promise<void> {
+  public async enablePlugin(name: string): Promise<void> {
     try {
-      // TODO: Replace with tRPC call
-      console.log('TODO: Log plugin error to database', pluginId, operation, error);
-    } catch (logError) {
-      console.error('Failed to log plugin error:', logError);
+      const plugin = this.installedPlugins.get(name);
+      if (!plugin) {
+        throw new Error(`Plugin ${name} not found`);
+      }
+
+      // Update plugin status in backend
+      await this.trpcClient.plugins.updatePluginStatus.mutate({
+        id: plugin.id,
+        status: 'enabled'
+      });
+
+      // Load and initialize plugin instance
+      const moduleUrl = `/plugins/${name}/index.js`;
+      const module = await import(/* @vite-ignore */ moduleUrl);
+      
+      if (typeof module.default !== 'function') {
+        throw new Error(`Plugin ${name} does not export a default class`);
+      }
+
+      plugin.instance = new module.default({
+        name: plugin.metadata.name,
+        version: plugin.metadata.version,
+        config: plugin.config,
+        debug: (...args) => console.debug(`[${plugin.metadata.name}]`, ...args)
+      });
+
+      await plugin.instance.initialize();
+      plugin.status = 'enabled';
+    } catch (error) {
+      console.error(`Failed to enable plugin ${name}:`, error);
+      throw error;
     }
   }
 
   /**
-   * Get plugin info
+   * Disable a plugin
    */
-  getPluginInfo(name: string): PluginInfo | undefined {
-    return this.pluginInfo.get(name);
+  public async disablePlugin(name: string): Promise<void> {
+    try {
+      const plugin = this.installedPlugins.get(name);
+      if (!plugin) {
+        throw new Error(`Plugin ${name} not found`);
+      }
+
+      // Update plugin status in backend
+      await this.trpcClient.plugins.updatePluginStatus.mutate({
+        id: plugin.id,
+        status: 'disabled'
+      });
+
+      // Cleanup plugin instance
+      if (plugin.instance) {
+        await plugin.instance.cleanup();
+        plugin.instance = null;
+      }
+
+      plugin.status = 'disabled';
+    } catch (error) {
+      console.error(`Failed to disable plugin ${name}:`, error);
+      throw error;
+    }
   }
 
   /**
-   * Get all plugin info
+   * Get plugin configuration
    */
-  getAllPluginInfo(): PluginInfo[] {
-    return Array.from(this.pluginInfo.values());
+  public async getPluginConfig(id: string): Promise<PluginConfig> {
+    try {
+      const config = await this.trpcClient.plugins.getPluginConfig.query({ id });
+      return config;
+    } catch (error) {
+      console.error(`Failed to get plugin config for ${id}:`, error);
+      throw error;
+    }
+  }
+
+  /**
+   * Update plugin configuration
+   */
+  public async setPluginConfig(id: string, config: PluginConfig): Promise<void> {
+    try {
+      await this.trpcClient.plugins.updatePluginConfig.mutate({
+        id,
+        config
+      });
+
+      const plugin = Array.from(this.installedPlugins.values()).find(p => p.id === id);
+      if (plugin) {
+        plugin.config = config;
+        if (plugin.instance) {
+          await plugin.instance.onConfigUpdate(config);
+        }
+      }
+    } catch (error) {
+      console.error(`Failed to update plugin config for ${id}:`, error);
+      throw error;
+    }
+  }
+
+  /**
+   * Validate plugin metadata
+   */
+  private validatePluginMetadata(metadata: PluginMetadata): boolean {
+    return !!(
+      metadata &&
+      typeof metadata.name === 'string' &&
+      typeof metadata.version === 'string' &&
+      typeof metadata.description === 'string' &&
+      Array.isArray(metadata.dependencies)
+    );
+  }
+
+  /**
+   * Get all installed plugins
+   */
+  public getAll(): Plugin[] {
+    return Array.from(this.installedPlugins.values());
+  }
+
+  /**
+   * Get enabled plugins
+   */
+  public getEnabled(): Plugin[] {
+    return Array.from(this.installedPlugins.values())
+      .filter(plugin => plugin.status === 'enabled' && plugin.instance !== null);
+  }
+
+  /**
+   * Get a specific plugin by name
+   */
+  public get(name: string): Plugin | undefined {
+    return this.installedPlugins.get(name);
+  }
+
+  /**
+   * Check if a plugin is enabled
+   */
+  public isEnabled(name: string): boolean {
+    const plugin = this.installedPlugins.get(name);
+    return plugin?.status === 'enabled' && plugin.instance !== null;
   }
 }
 
-// Create singleton instance
-export const pluginRegistry = new PluginRegistry();
+export const pluginRegistry = PluginRegistry.getInstance();

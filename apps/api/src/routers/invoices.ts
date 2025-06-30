@@ -1,126 +1,169 @@
 import { z } from 'zod';
-import { router, protectedProcedure, adminProcedure, tenantProcedure } from '../trpc/trpc.js';
+import { router, protectedProcedure, requirePermission } from '../trpc/trpc.js';
 import { db, invoices, invoiceItems, clients, users, subscriptions, payments } from '../db/index.js';
-import { eq, and, desc, count, ilike, or, gte, lte } from 'drizzle-orm';
+import { eq, and, desc, count, ilike, or, gte, lte, isNull } from 'drizzle-orm';
 import { TRPCError } from '@trpc/server';
 import { InvoiceNumberService } from '../lib/invoice/InvoiceNumberService.js';
 import { InvoicePDFService } from '../lib/invoice/InvoicePDFService.js';
 import { InvoiceEventHandler } from '../lib/invoice/InvoiceEventHandler.js';
+import { ResourceType } from '../lib/auth/PermissionManager.js';
+import { ValidationError } from '../lib/errors';
+
+const CreateInvoiceInput = z.object({
+  clientId: z.string().uuid({
+    message: 'Please select a valid client.',
+  }),
+  subscriptionId: z.string().uuid({
+    message: 'Invalid subscription ID.',
+  }).optional(),
+  items: z.array(z.object({
+    description: z.string().min(1, {
+      message: 'Item description cannot be empty.',
+    }),
+    quantity: z.number().int().min(1, {
+      message: 'Quantity must be at least 1.',
+    }).default(1),
+    unitPrice: z.string().regex(/^\d+(\.\d{1,2})?$/, {
+      message: 'Price must be a valid number.',
+    }),
+  }), {
+    required_error: 'At least one invoice item is required.',
+  }).min(1, {
+    message: 'At least one invoice item is required.',
+  }),
+  tax: z.string().regex(/^\d+(\.\d{1,2})?$/, {
+    message: 'Tax must be a valid percentage.',
+  }).default('0'),
+  dueDate: z.date({
+    required_error: 'Due date is required.',
+    invalid_type_error: 'Due date must be a valid date.',
+  }),
+  currency: z.string().default('USD'),
+});
 
 export const invoicesRouter = router({
-  getAll: tenantProcedure
+  getAll: requirePermission('invoice.read')
     .input(z.object({
       limit: z.number().min(1).max(100).default(10),
       offset: z.number().min(0).default(0),
       search: z.string().optional(),
-      status: z.enum(['DRAFT', 'PENDING', 'PAID', 'OVERDUE', 'CANCELLED']).optional(),
-      startDate: z.date().optional(),
-      endDate: z.date().optional(),
+      status: z.enum(['DRAFT', 'PENDING', 'PAID', 'CANCELLED']).optional(),
+      dateFrom: z.string().optional(),
+      dateTo: z.string().optional(),
     }))
-    .query(async ({ input, ctx }) => {
-      const { limit, offset, search, status, startDate, endDate } = input;
-
-      let whereConditions = [eq(invoices.tenantId, ctx.tenantId!)];
-
-      if (search) {
-        whereConditions.push(
-          or(
-            ilike(invoices.invoiceNumber, `%${search}%`),
-            ilike(clients.companyName, `%${search}%`),
-            ilike(users.email, `%${search}%`)
-          )!
-        );
+    .query(async ({ ctx, input }) => {
+      // Ensure tenant context
+      if (!ctx.tenantId) {
+        throw new TRPCError({
+          code: 'FORBIDDEN',
+          message: 'Tenant context is required',
+        });
       }
 
-      if (status) {
-        whereConditions.push(eq(invoices.status, status));
+      try {
+        const conditions = [eq(invoices.tenantId, ctx.tenantId)]; // Always filter by tenant
+
+        // Add search condition if provided
+        if (input.search) {
+          conditions.push(
+            or(
+              ilike(invoices.invoiceNumber, `%${input.search}%`),
+              ilike(users.email, `%${input.search}%`),
+              ilike(users.firstName, `%${input.search}%`),
+              ilike(users.lastName, `%${input.search}%`)
+            )
+          );
+        }
+
+        // Add status filter if provided
+        if (input.status) {
+          conditions.push(eq(invoices.status, input.status));
+        }
+
+        // Add date range filters if provided
+        if (input.dateFrom) {
+          conditions.push(gte(invoices.dueDate, new Date(input.dateFrom)));
+        }
+        if (input.dateTo) {
+          conditions.push(lte(invoices.dueDate, new Date(input.dateTo)));
+        }
+
+        const whereClause = and(...conditions);
+
+        // Base query for fetching invoices with proper joins
+        const query = db
+          .select({
+            id: invoices.id,
+            number: invoices.invoiceNumber,
+            status: invoices.status,
+            subtotal: invoices.subtotal,
+            tax: invoices.tax,
+            total: invoices.total,
+            currency: invoices.currency,
+            dueDate: invoices.dueDate,
+            createdAt: invoices.createdAt,
+            client: {
+              id: clients.id,
+              name: users.firstName,
+              email: users.email,
+            },
+          })
+          .from(invoices)
+          .leftJoin(clients, eq(invoices.clientId, clients.id))
+          .leftJoin(users, eq(clients.userId, users.id))
+          .where(whereClause)
+          .orderBy(desc(invoices.createdAt))
+          .limit(input.limit)
+          .offset(input.offset);
+
+        // Count query with proper joins
+        const countQuery = db
+          .select({ value: count() })
+          .from(invoices)
+          .leftJoin(clients, eq(invoices.clientId, clients.id))
+          .leftJoin(users, eq(clients.userId, users.id))
+          .where(whereClause);
+
+        const [results, countResult] = await Promise.all([
+          query,
+          countQuery,
+        ]);
+
+        const total = Number(countResult[0]?.value ?? 0);
+
+        return {
+          invoices: results,
+          total,
+          hasMore: total > (input.offset + input.limit),
+        };
+      } catch (error) {
+        console.error('Error in invoices.getAll:', error);
+        throw new TRPCError({
+          code: 'INTERNAL_SERVER_ERROR',
+          message: 'An error occurred while fetching invoices',
+          cause: error,
+        });
       }
-
-      if (startDate) {
-        whereConditions.push(gte(invoices.createdAt, startDate));
-      }
-
-      if (endDate) {
-        whereConditions.push(lte(invoices.createdAt, endDate));
-      }
-
-      const allInvoices = await db
-        .select({
-          id: invoices.id,
-          invoiceNumber: invoices.invoiceNumber,
-          status: invoices.status,
-          subtotal: invoices.subtotal,
-          tax: invoices.tax,
-          total: invoices.total,
-          currency: invoices.currency,
-          dueDate: invoices.dueDate,
-          paidAt: invoices.paidAt,
-          createdAt: invoices.createdAt,
-          clientId: clients.id,
-          clientCompanyName: clients.companyName,
-          clientUserEmail: users.email,
-          clientUserFirstName: users.firstName,
-          clientUserLastName: users.lastName,
-        })
-        .from(invoices)
-        .leftJoin(clients, eq(invoices.clientId, clients.id))
-        .leftJoin(users, eq(clients.userId, users.id))
-        .where(and(...whereConditions))
-        .orderBy(desc(invoices.createdAt))
-        .limit(limit)
-        .offset(offset);
-
-      const [totalResult] = await db
-        .select({ count: count() })
-        .from(invoices)
-        .leftJoin(clients, eq(invoices.clientId, clients.id))
-        .leftJoin(users, eq(clients.userId, users.id))
-        .where(and(...whereConditions));
-
-      return {
-        invoices: allInvoices,
-        total: totalResult.count,
-        hasMore: offset + limit < totalResult.count,
-      };
     }),
 
-  getById: tenantProcedure
-    .input(z.object({
-      id: z.string().uuid(),
-    }))
-    .query(async ({ input, ctx }) => {
-      const [invoice] = await ctx.db
-        .select({
-          id: invoices.id,
-          invoiceNumber: invoices.invoiceNumber,
-          status: invoices.status,
-          subtotal: invoices.subtotal,
-          tax: invoices.tax,
-          total: invoices.total,
-          currency: invoices.currency,
-          dueDate: invoices.dueDate,
-          paidAt: invoices.paidAt,
-          createdAt: invoices.createdAt,
-          updatedAt: invoices.updatedAt,
-          clientId: clients.id,
-          clientCompanyName: clients.companyName,
-          clientAddress: clients.address,
-          clientCity: clients.city,
-          clientState: clients.state,
-          clientZipCode: clients.zipCode,
-          clientCountry: clients.country,
-          clientUserEmail: users.email,
-          clientUserFirstName: users.firstName,
-          clientUserLastName: users.lastName,
-        })
-        .from(invoices)
-        .leftJoin(clients, eq(invoices.clientId, clients.id))
-        .leftJoin(users, eq(clients.userId, users.id))
-        .where(and(
+  getById: requirePermission('invoice.read', ctx => ({
+    type: ResourceType.INVOICE,
+    id: ctx.input.id,
+    tenantId: ctx.tenantId || '',
+  }))
+    .input(z.object({ id: z.string() }))
+    .query(async ({ ctx, input }) => {
+      const invoice = await db.query.invoices.findFirst({
+        where: and(
           eq(invoices.id, input.id),
-          eq(invoices.tenantId, ctx.tenantId)
-        ))
-        .limit(1);
+          ctx.tenantId ? eq(invoices.tenantId, ctx.tenantId) : undefined
+        ),
+        with: {
+          client: true,
+          items: true,
+          payments: true,
+        },
+      });
 
       if (!invoice) {
         throw new TRPCError({
@@ -129,26 +172,10 @@ export const invoicesRouter = router({
         });
       }
 
-      // Get invoice items
-      const items = await ctx.db
-        .select()
-        .from(invoiceItems)
-        .where(eq(invoiceItems.invoiceId, input.id));
-
-      // Get payments
-      const invoicePayments = await ctx.db
-        .select()
-        .from(payments)
-        .where(eq(payments.invoiceId, input.id));
-
-      return {
-        ...invoice,
-        items,
-        payments: invoicePayments,
-      };
+      return invoice;
     }),
 
-  getStats: tenantProcedure
+  getStats: requirePermission('invoice.read')
     .query(async ({ ctx }) => {
       // Get total invoices count
       const [totalInvoices] = await ctx.db
@@ -214,21 +241,33 @@ export const invoicesRouter = router({
       };
     }),
 
-  create: adminProcedure
-    .input(z.object({
-      clientId: z.string().uuid(),
-      subscriptionId: z.string().uuid().optional(),
-      items: z.array(z.object({
-        description: z.string(),
-        quantity: z.number().int().min(1).default(1),
-        unitPrice: z.string().regex(/^\d+(\.\d{1,2})?$/),
-      })),
-      tax: z.string().regex(/^\d+(\.\d{1,2})?$/).default('0'),
-      dueDate: z.date(),
-      currency: z.string().default('USD'),
-    }))
+  create: requirePermission('invoice.create')
+    .input((input) => {
+      const result = CreateInvoiceInput.safeParse(input);
+      if (!result.success) {
+        throw new ValidationError('Invoice creation failed due to validation errors.', result.error.flatten().fieldErrors);
+      }
+      return result.data;
+    })
     .mutation(async ({ input, ctx }) => {
       const { clientId, subscriptionId, items, tax, dueDate, currency } = input;
+
+      // Validate client exists
+      const client = await ctx.db
+        .select()
+        .from(clients)
+        .where(and(
+          eq(clients.id, clientId),
+          eq(clients.tenantId, ctx.tenantId!)
+        ))
+        .limit(1);
+
+      if (!client.length) {
+        throw new TRPCError({
+          code: 'BAD_REQUEST',
+          message: 'Selected client does not exist'
+        });
+      }
 
       // Calculate totals
       const subtotal = items.reduce((sum, item) => 
@@ -248,9 +287,9 @@ export const invoicesRouter = router({
           userId: ctx.user.id,
           subscriptionId,
           invoiceNumber,
-          subtotal: subtotal.toString(),
-          tax: taxAmount.toString(),
-          total: total.toString(),
+          subtotal: subtotal.toFixed(2),
+          tax: taxAmount.toFixed(2),
+          total: total.toFixed(2),
           currency,
           dueDate,
           tenantId: ctx.tenantId,
@@ -263,7 +302,7 @@ export const invoicesRouter = router({
         description: item.description,
         quantity: item.quantity,
         unitPrice: item.unitPrice,
-        total: (parseFloat(item.unitPrice) * item.quantity).toString(),
+        total: (parseFloat(item.unitPrice) * item.quantity).toFixed(2),
       }));
 
       await ctx.db
@@ -281,7 +320,11 @@ export const invoicesRouter = router({
       return newInvoice;
     }),
 
-  updateStatus: adminProcedure
+  updateStatus: requirePermission('invoice.update', ctx => ({
+    type: 'INVOICE',
+    id: ctx.input.id,
+    tenantId: ctx.tenantId || '',
+  }))
     .input(z.object({
       id: z.string().uuid(),
       status: z.enum(['DRAFT', 'PENDING', 'PAID', 'OVERDUE', 'CANCELLED']),
@@ -330,7 +373,11 @@ export const invoicesRouter = router({
       return updatedInvoice;
     }),
 
-  generatePDF: tenantProcedure
+  generatePDF: requirePermission('invoice.read', ctx => ({
+    type: 'INVOICE',
+    id: ctx.input.id,
+    tenantId: ctx.tenantId || '',
+  }))
     .input(z.object({
       id: z.string().uuid(),
     }))
@@ -356,28 +403,19 @@ export const invoicesRouter = router({
     }),
 
   // Get invoices for current client user
-  getByClient: protectedProcedure
+  getByClient: requirePermission('invoice.read_own')
     .input(z.object({
       limit: z.number().min(1).max(100).default(10),
       offset: z.number().min(0).default(0),
       status: z.enum(['DRAFT', 'PENDING', 'PAID', 'OVERDUE', 'CANCELLED']).optional(),
     }))
     .query(async ({ input, ctx }) => {
-      if (!ctx.user || ctx.user.role !== 'CLIENT') {
-        throw new TRPCError({
-          code: 'FORBIDDEN',
-          message: 'Only client users can access their invoices',
-        });
-      }
-
-      const { limit, offset, status } = input;
-
       // First get the client ID for the current user
       const [clientRecord] = await db
         .select({ id: clients.id })
         .from(clients)
         .where(and(
-          eq(clients.userId, ctx.user.id),
+          eq(clients.userId, ctx.user!.id),
           eq(clients.tenantId, ctx.tenantId!)
         ))
         .limit(1);
@@ -394,8 +432,8 @@ export const invoicesRouter = router({
         eq(invoices.tenantId, ctx.tenantId!)
       ];
 
-      if (status) {
-        whereConditions.push(eq(invoices.status, status));
+      if (input.status) {
+        whereConditions.push(eq(invoices.status, input.status));
       }
 
       const clientInvoices = await db
@@ -414,8 +452,8 @@ export const invoicesRouter = router({
         .from(invoices)
         .where(and(...whereConditions))
         .orderBy(desc(invoices.createdAt))
-        .limit(limit)
-        .offset(offset);
+        .limit(input.limit)
+        .offset(input.offset);
 
       const [totalResult] = await db
         .select({ count: count() })
@@ -425,31 +463,28 @@ export const invoicesRouter = router({
       return {
         invoices: clientInvoices,
         total: totalResult.count,
-        hasMore: offset + limit < totalResult.count,
+        hasMore: input.offset + input.limit < totalResult.count,
       };
     }),
 
   // Process payment for invoice (client portal)
-  processPayment: protectedProcedure
+  processPayment: requirePermission('invoice.process_payment', ctx => ({
+    type: 'INVOICE',
+    id: ctx.input.invoiceId,
+    tenantId: ctx.tenantId || '',
+  }))
     .input(z.object({
       invoiceId: z.string().uuid(),
       paymentMethodId: z.string().optional(),
       savePaymentMethod: z.boolean().default(false),
     }))
     .mutation(async ({ input, ctx }) => {
-      if (!ctx.user || ctx.user.role !== 'CLIENT') {
-        throw new TRPCError({
-          code: 'FORBIDDEN',
-          message: 'Only client users can process payments',
-        });
-      }
-
       // First get the client ID and verify invoice ownership
       const [clientRecord] = await db
         .select({ id: clients.id })
         .from(clients)
         .where(and(
-          eq(clients.userId, ctx.user.id),
+          eq(clients.userId, ctx.user!.id),
           eq(clients.tenantId, ctx.tenantId!)
         ))
         .limit(1);
@@ -562,19 +597,12 @@ export const invoicesRouter = router({
     }),
 
   // Confirm payment (webhook or client confirmation)
-  confirmPayment: protectedProcedure
+  confirmPayment: requirePermission('invoice.process_payment')
     .input(z.object({
       paymentIntentId: z.string(),
       paymentMethodId: z.string().optional(),
     }))
     .mutation(async ({ input, ctx }) => {
-      if (!ctx.user || ctx.user.role !== 'CLIENT') {
-        throw new TRPCError({
-          code: 'FORBIDDEN',
-          message: 'Only client users can confirm payments',
-        });
-      }
-
       // Get payment record
       const [payment] = await db
         .select({

@@ -9,7 +9,9 @@ import {
   NewSupportTicket,
   NewTicketMessage,
   SupportTicket,
-  TicketMessage
+  TicketMessage,
+  SupportCategory,
+  SupportAgentProfile
 } from '../../db/schema';
 import { TicketNumberService } from './TicketNumberService';
 import { SupportEmailService } from './SupportEmailService';
@@ -60,6 +62,17 @@ export interface TicketFilters {
   createdAfter?: Date;
   createdBefore?: Date;
   search?: string;
+}
+
+interface TicketAssignmentScore {
+  agentId: string;
+  score: number;
+  factors: {
+    skillMatch: number;
+    workload: number;
+    availability: number;
+    categoryExperience: number;
+  };
 }
 
 export class SupportService {
@@ -295,58 +308,114 @@ export class SupportService {
   }
 
   /**
-   * Assign ticket to an agent
+   * Intelligently assign a ticket to the most suitable agent
    */
-  async assignTicket(
-    ticketId: string,
-    assignedToId: string,
-    tenantId: string,
-    assignedById?: string
-  ): Promise<SupportTicket> {
-    return await db.transaction(async (tx) => {
-      // Verify agent can be assigned
-      const canAssign = await this.canAssignToAgent(assignedToId, tenantId, tx);
-      if (!canAssign) {
-        throw new Error('Agent cannot be assigned to more tickets or is not available');
-      }
-
-      const [updatedTicket] = await tx
-        .update(supportTickets)
-        .set({
-          assignedToId,
-          lastActivityAt: new Date(),
-          updatedAt: new Date(),
-        })
+  async assignTicket(ticketId: string, tenantId: string): Promise<string | null> {
+    try {
+      // Get ticket details
+      const [ticket] = await db
+        .select()
+        .from(supportTickets)
         .where(and(
           eq(supportTickets.id, ticketId),
           eq(supportTickets.tenantId, tenantId)
         ))
-        .returning();
+        .limit(1);
 
-      if (!updatedTicket) {
+      if (!ticket) {
         throw new Error('Ticket not found');
       }
 
-      // Update agent ticket counts
-      await this.updateAgentTicketCounts(assignedToId, tenantId, tx);
+      // Get all available agents
+      const agents = await db
+        .select()
+        .from(supportAgentProfiles)
+        .where(and(
+          eq(supportAgentProfiles.tenantId, tenantId),
+          eq(supportAgentProfiles.isCurrentlyAvailable, true)
+        ));
 
-      // Add system message
-      await tx
-        .insert(ticketMessages)
-        .values({
-          ticketId: ticketId,
-          content: `Ticket assigned to support agent`,
-          messageType: 'SYSTEM_MESSAGE',
-          authorId: assignedById,
-          isInternal: true,
-          tenantId,
-        });
+      if (!agents.length) {
+        console.warn('No available agents found');
+        return null;
+      }
 
-      // Trigger automation and notifications
-      await this.handleTicketAssigned(updatedTicket, tenantId);
+      // Calculate assignment scores for each agent
+      const scores: TicketAssignmentScore[] = await Promise.all(
+        agents.map(async (agent) => {
+          const score = await this.calculateAgentScore(agent, ticket);
+          return {
+            agentId: agent.userId,
+            score: score.total,
+            factors: score.factors
+          };
+        })
+      );
 
-      return updatedTicket;
-    });
+      // Sort by score and get the best match
+      scores.sort((a, b) => b.score - a.score);
+      const bestMatch = scores[0];
+
+      if (bestMatch && bestMatch.score > 0) {
+        // Assign ticket to the best matching agent
+        await db
+          .update(supportTickets)
+          .set({ 
+            assignedToId: bestMatch.agentId,
+            assignedAt: new Date()
+          })
+          .where(eq(supportTickets.id, ticketId));
+
+        return bestMatch.agentId;
+      }
+
+      return null;
+    } catch (error) {
+      console.error('Failed to assign ticket:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Calculate an agent's suitability score for a ticket
+   */
+  private async calculateAgentScore(
+    agent: SupportAgentProfile,
+    ticket: SupportTicket
+  ): Promise<{ 
+    total: number;
+    factors: {
+      skillMatch: number;
+      workload: number;
+      availability: number;
+      categoryExperience: number;
+    }
+  }> {
+    const factors = {
+      skillMatch: 0,
+      workload: 0,
+      availability: 0,
+      categoryExperience: 0
+    };
+
+    // Calculate workload score based on current ticket count
+    factors.workload = agent.currentTicketCount ? 1 / (1 + agent.currentTicketCount) : 1;
+
+    // Calculate availability score
+    factors.availability = agent.isCurrentlyAvailable ? 1 : 0;
+
+    // Calculate category experience score
+    if (ticket.categoryId && agent.categoryExperience?.[ticket.categoryId]) {
+      factors.categoryExperience = Math.min(agent.categoryExperience[ticket.categoryId] / 100, 1);
+    }
+
+    // Calculate total score
+    const total = Object.values(factors).reduce((sum, score) => sum + score, 0);
+
+    return {
+      total,
+      factors
+    };
   }
 
   /**
@@ -679,18 +748,70 @@ export class SupportService {
     // await this.executePluginHook('ticket.status.changed', { ticket, oldStatus, tenantId });
   }
 
-  private async handleTicketAssigned(
-    ticket: SupportTicket,
-    tenantId: string
-  ): Promise<void> {
-    // Email notifications
-    await this.emailService.sendAssignmentNotification(ticket, tenantId);
+  /**
+   * Group tickets by priority and category
+   */
+  async groupTickets(tenantId: string): Promise<void> {
+    try {
+      // Get all ungrouped tickets
+      const ungroupedTickets = await db
+        .select()
+        .from(supportTickets)
+        .where(and(
+          eq(supportTickets.tenantId, tenantId),
+          eq(supportTickets.status, 'OPEN'),
+          isNull(supportTickets.groupId)
+        ));
 
-    // Trigger automation rules
-    await this.automationEngine.processTicketEvent('ticket.assigned', ticket, tenantId);
+      // Group by priority and category
+      const groups = new Map<string, SupportTicket[]>();
+      
+      for (const ticket of ungroupedTickets) {
+        const key = `${ticket.priority}-${ticket.categoryId}`;
+        if (!groups.has(key)) {
+          groups.set(key, []);
+        }
+        groups.get(key)!.push(ticket);
+      }
 
-    // Plugin hooks
-    // await this.executePluginHook('ticket.assigned', { ticket, tenantId });
+      // Create or update ticket groups
+      for (const [key, tickets] of groups.entries()) {
+        const [priority, categoryId] = key.split('-');
+        
+        if (tickets.length >= 2) { // Only create groups with 2+ tickets
+          // Create new group
+          const [group] = await db
+            .insert(supportTicketGroups)
+            .values({
+              name: `${priority} ${categoryId} Group`,
+              priority: priority as any,
+              categoryId,
+              tenantId,
+              ticketCount: tickets.length,
+              createdAt: new Date(),
+              updatedAt: new Date()
+            })
+            .returning();
+
+          // Update tickets with group ID
+          await db
+            .update(supportTickets)
+            .set({ 
+              groupId: group.id,
+              updatedAt: new Date()
+            })
+            .where(
+              and(
+                eq(supportTickets.tenantId, tenantId),
+                sql`id = ANY(${tickets.map(t => t.id)})`
+              )
+            );
+        }
+      }
+    } catch (error) {
+      console.error('Failed to group tickets:', error);
+      throw error;
+    }
   }
 }
 

@@ -2,6 +2,7 @@ import React from 'react';
 import { Bell, Search, Settings, User, LogOut, Menu } from 'lucide-react';
 import { useAuth } from '../../hooks/useAuth';
 import { PluginSlot } from '../../lib/plugins';
+import { LanguageSelector } from '../LanguageSelector';
 
 interface AdminHeaderProps {
   onToggleSidebar?: () => void;
@@ -83,6 +84,9 @@ export function AdminHeader({ onToggleSidebar, sidebarOpen }: AdminHeaderProps) 
             <Bell className="w-5 h-5 text-gray-600" />
             <span className="absolute -top-1 -right-1 w-3 h-3 bg-red-500 rounded-full"></span>
           </button>
+
+          {/* Language Selector */}
+          <LanguageSelector variant="minimal" placement="bottom-right" />
 
           {/* Settings */}
           <button className="p-2 rounded-lg hover:bg-gray-100 transition-colors">

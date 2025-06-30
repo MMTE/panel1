@@ -1,0 +1,29 @@
+{
+  "common": {
+    "language": "Language",
+    "languages": {
+      "en": "English",
+      "es": "Spanish"
+    },
+    "actions": {
+      "save": "Save",
+      "cancel": "Cancel",
+      "delete": "Delete",
+      "edit": "Edit",
+      "create": "Create",
+      "search": "Search"
+    },
+    "navigation": {
+      "dashboard": "Dashboard",
+      "clients": "Clients",
+      "invoices": "Invoices",
+      "support": "Support",
+      "settings": "Settings"
+    },
+    "auth": {
+      "signIn": "Sign In",
+      "signOut": "Sign Out",
+      "profile": "Profile"
+    }
+  }
+} 

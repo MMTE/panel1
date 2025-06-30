@@ -1,10 +1,20 @@
-import { pgTable, uuid, text, boolean, timestamp, pgEnum } from 'drizzle-orm/pg-core';
+import { pgTable, uuid, text, boolean, timestamp, pgEnum, primaryKey } from 'drizzle-orm/pg-core';
 import { relations } from 'drizzle-orm';
 import { tenants } from './tenants';
 import { clients } from './clients';
 import { invoices } from './invoices';
+import { permissions, rolePermissions } from './roles';
 
-export const userRoleEnum = pgEnum('user_role', ['ADMIN', 'CLIENT', 'RESELLER']);
+export const userRoleEnum = pgEnum('user_role', [
+  'SUPER_ADMIN', 
+  'ADMIN', 
+  'MANAGER', 
+  'SUPPORT_AGENT', 
+  'BILLING_AGENT', 
+  'RESELLER', 
+  'CLIENT', 
+  'CLIENT_USER'
+]);
 
 export const users = pgTable('users', {
   id: uuid('id').primaryKey().defaultRandom(),

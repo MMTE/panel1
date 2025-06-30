@@ -1,0 +1,139 @@
+{
+  "id": "support-plugin",
+  "name": "Support Management Plugin",
+  "version": "1.0.0",
+  "description": "Manages support plans, tickets, and automation through the component system",
+  "author": "Panel1 Team",
+  "tags": ["support", "tickets", "automation"],
+  "defaultConfig": {
+    "enabled": true,
+    "supportLevels": {
+      "basic": {
+        "responseTime": "24h",
+        "channels": ["email", "portal"],
+        "businessHours": true,
+        "features": ["ticket-creation", "knowledge-base-access"],
+        "automationRules": ["auto-categorize", "suggest-articles"]
+      },
+      "standard": {
+        "responseTime": "12h",
+        "channels": ["email", "portal", "chat"],
+        "businessHours": true,
+        "features": ["ticket-creation", "knowledge-base-access", "priority-support", "file-attachments"],
+        "automationRules": ["auto-categorize", "suggest-articles", "auto-assign", "sla-monitoring"]
+      },
+      "premium": {
+        "responseTime": "4h",
+        "channels": ["email", "portal", "chat", "phone"],
+        "businessHours": false,
+        "features": ["ticket-creation", "knowledge-base-access", "priority-support", "file-attachments", "24-7-support", "dedicated-agent"],
+        "automationRules": ["auto-categorize", "suggest-articles", "auto-assign", "sla-monitoring", "vip-routing"]
+      }
+    },
+    "automationEnabled": true,
+    "knowledgeBaseEnabled": true,
+    "ticketEscalation": {
+      "enabled": true,
+      "thresholds": {
+        "warning": 75,
+        "critical": 90
+      }
+    },
+    "channels": {
+      "email": {
+        "enabled": true,
+        "inboundAddress": "support@panel1.com"
+      },
+      "chat": {
+        "enabled": true,
+        "platform": "web-widget"
+      },
+      "portal": {
+        "enabled": true
+      },
+      "api": {
+        "enabled": true
+      }
+    }
+  },
+  "dependencies": {},
+  "hooks": [
+    {
+      "event": "ticket.created",
+      "priority": 10
+    },
+    {
+      "event": "ticket.updated",
+      "priority": 10
+    },
+    {
+      "event": "ticket.assigned",
+      "priority": 10
+    },
+    {
+      "event": "ticket.resolved",
+      "priority": 10
+    },
+    {
+      "event": "ticket.reopened",
+      "priority": 10
+    },
+    {
+      "event": "ticket.sla.breached",
+      "priority": 10
+    },
+    {
+      "event": "ticket.automation.triggered",
+      "priority": 10
+    },
+    {
+      "event": "knowledge.article.created",
+      "priority": 10
+    },
+    {
+      "event": "knowledge.article.suggested",
+      "priority": 10
+    }
+  ],
+  "extensionPoints": [
+    {
+      "id": "ticket-automation-rule",
+      "description": "Define custom ticket automation rules",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "name": { "type": "string" },
+          "conditions": { "type": "array" },
+          "actions": { "type": "array" }
+        },
+        "required": ["name", "conditions", "actions"]
+      }
+    },
+    {
+      "id": "support-channel",
+      "description": "Add custom support channels",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "name": { "type": "string" },
+          "handler": { "type": "function" },
+          "features": { "type": "array" }
+        },
+        "required": ["name", "handler", "features"]
+      }
+    },
+    {
+      "id": "knowledge-base-integration",
+      "description": "Integrate with external knowledge base systems",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "name": { "type": "string" },
+          "handler": { "type": "function" },
+          "capabilities": { "type": "array" }
+        },
+        "required": ["name", "handler", "capabilities"]
+      }
+    }
+  ]
+} 

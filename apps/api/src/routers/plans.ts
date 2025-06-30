@@ -10,18 +10,35 @@ export const plansRouter = router({
       activeOnly: z.boolean().default(true),
     }))
     .query(async ({ input, ctx }) => {
-      const conditions = [
-        ...(ctx.tenantId ? [eq(plans.tenantId, ctx.tenantId)] : []),
-        ...(input.activeOnly ? [eq(plans.isActive, true)] : []),
-      ];
+      // Ensure tenant context
+      if (!ctx.tenantId) {
+        throw new TRPCError({
+          code: 'FORBIDDEN',
+          message: 'Tenant context is required',
+        });
+      }
 
-      const allPlans = await db
-        .select()
-        .from(plans)
-        .where(conditions.length > 0 ? and(...conditions) : undefined)
-        .orderBy(plans.price);
+      try {
+        const conditions = [
+          eq(plans.tenantId, ctx.tenantId),
+          ...(input.activeOnly ? [eq(plans.isActive, true)] : []),
+        ];
 
-      return allPlans;
+        const allPlans = await db
+          .select()
+          .from(plans)
+          .where(and(...conditions))
+          .orderBy(plans.price);
+
+        return allPlans;
+      } catch (error) {
+        console.error('Error in plans.getAll:', error);
+        throw new TRPCError({
+          code: 'INTERNAL_SERVER_ERROR',
+          message: 'An error occurred while fetching plans',
+          cause: error,
+                 });
+       }
     }),
 
   getById: protectedProcedure
@@ -29,25 +46,40 @@ export const plansRouter = router({
       id: z.string().uuid(),
     }))
     .query(async ({ input, ctx }) => {
-      const conditions = [
-        eq(plans.id, input.id),
-        ...(ctx.tenantId ? [eq(plans.tenantId, ctx.tenantId)] : []),
-      ];
-
-      const [plan] = await db
-        .select()
-        .from(plans)
-        .where(and(...conditions))
-        .limit(1);
-
-      if (!plan) {
+      // Ensure tenant context
+      if (!ctx.tenantId) {
         throw new TRPCError({
-          code: 'NOT_FOUND',
-          message: 'Plan not found',
+          code: 'FORBIDDEN',
+          message: 'Tenant context is required',
         });
       }
 
-      return plan;
+      try {
+        const [plan] = await db
+          .select()
+          .from(plans)
+          .where(and(
+            eq(plans.id, input.id),
+            eq(plans.tenantId, ctx.tenantId)
+          ))
+          .limit(1);
+
+        if (!plan) {
+          throw new TRPCError({
+            code: 'NOT_FOUND',
+            message: 'Plan not found',
+          });
+        }
+
+        return plan;
+      } catch (error) {
+        console.error('Error in plans.getById:', error);
+        throw new TRPCError({
+          code: 'INTERNAL_SERVER_ERROR',
+          message: 'An error occurred while fetching plan',
+          cause: error,
+        });
+      }
     }),
 
   create: adminProcedure

@@ -1,42 +1,49 @@
-// import { supabase } from '../supabase'; // TODO: Replace with tRPC
+import { trpc } from '../../api/trpc';
 
 export interface Tenant {
   id: string;
   name: string;
   slug: string;
   domain?: string;
-  settings: {
-    features?: {
-      plugins?: boolean;
-      multi_currency?: boolean;
-      custom_branding?: boolean;
+  branding?: {
+    logo?: string;
+    colors?: {
+      primary?: string;
+      secondary?: string;
+      accent?: string;
     };
-    limits?: {
-      max_users?: number;
-      max_clients?: number;
-      max_storage?: number;
-    };
+    customCss?: string;
   };
-  branding: {
-    primary_color?: string;
-    secondary_color?: string;
-    logo_url?: string;
-    company_name?: string;
-    favicon_url?: string;
-    custom_css?: string;
-  };
-  is_active: boolean;
-  created_at: string;
-  updated_at: string;
+  settings?: Record<string, any>;
+  metadata?: Record<string, any>;
+  createdAt: Date;
+  updatedAt: Date;
 }
 
 export interface TenantUser {
-  id: string;
-  tenant_id: string;
-  user_id: string;
-  role: 'ADMIN' | 'CLIENT' | 'RESELLER';
-  is_active: boolean;
-  created_at: string;
+  userId: string;
+  tenantId: string;
+  role: string;
+  permissions?: string[];
+  metadata?: Record<string, any>;
+}
+
+export interface TenantCreateData {
+  name: string;
+  slug: string;
+  domain?: string;
+  branding?: Tenant['branding'];
+  settings?: Record<string, any>;
+  metadata?: Record<string, any>;
+}
+
+export interface TenantUpdateData {
+  name?: string;
+  slug?: string;
+  domain?: string;
+  branding?: Partial<Tenant['branding']>;
+  settings?: Record<string, any>;
+  metadata?: Record<string, any>;
 }
 
 /**
@@ -46,45 +53,14 @@ export interface TenantUser {
  */
 export class TenantManager {
   private static instance: TenantManager;
+  private trpcClient: typeof trpc;
   private currentTenant: Tenant | null = null;
 
-  // Demo tenant for development
-  private readonly defaultTenant: Tenant = {
-    id: 'demo-tenant-id',
-    name: 'Panel1 Demo',
-    slug: 'demo',
-    domain: 'demo.panel1.dev',
-    settings: {
-      features: {
-        plugins: true,
-        multi_currency: true,
-        custom_branding: true,
-      },
-      limits: {
-        max_users: 1000,
-        max_clients: 10000,
-        max_storage: 100000, // 100GB in MB
-      },
-    },
-    branding: {
-      primary_color: '#8B5CF6',
-      secondary_color: '#EC4899',
-      logo_url: '/logo.png',
-      company_name: 'Panel1 Demo',
-      favicon_url: '/favicon.ico',
-      custom_css: '',
-    },
-    is_active: true,
-    created_at: new Date().toISOString(),
-    updated_at: new Date().toISOString(),
-  };
-
   private constructor() {
-    // Initialize with default tenant for development
-    this.currentTenant = this.defaultTenant;
+    this.trpcClient = trpc;
   }
 
-  static getInstance(): TenantManager {
+  public static getInstance(): TenantManager {
     if (!TenantManager.instance) {
       TenantManager.instance = new TenantManager();
     }
@@ -92,198 +68,147 @@ export class TenantManager {
   }
 
   /**
-   * Get current tenant from context
-   */
-  getCurrentTenant(): Tenant | null {
-    return this.currentTenant;
-  }
-
-  /**
-   * Set current tenant
-   */
-  setCurrentTenant(tenant: Tenant): void {
-    this.currentTenant = tenant;
-  }
-
-  /**
    * Get tenant by ID
-   * TODO: Replace with tRPC call to backend tenant service
    */
-  async getTenant(tenantId: string): Promise<Tenant | null> {
+  public async getTenant(tenantId: string): Promise<Tenant> {
     try {
-      // For now, return default tenant if ID matches, null otherwise
-      if (tenantId === this.defaultTenant.id) {
-        return this.defaultTenant;
-      }
-      
-      console.log(`TODO: Implement tRPC call for getTenant(${tenantId})`);
-      return null;
+      const tenant = await this.trpcClient.tenants.getTenant.query({ id: tenantId });
+      return tenant;
     } catch (error) {
-      console.error('Error fetching tenant:', error);
-      return null;
+      console.error(`Failed to get tenant ${tenantId}:`, error);
+      throw error;
     }
   }
 
   /**
    * Get tenant by slug or domain
-   * TODO: Replace with tRPC call to backend tenant service
    */
-  async getTenantBySlugOrDomain(identifier: string): Promise<Tenant | null> {
+  public async getTenantBySlugOrDomain(identifier: string): Promise<Tenant> {
     try {
-      // For now, return default tenant if identifier matches
-      if (identifier === this.defaultTenant.slug || identifier === this.defaultTenant.domain) {
-        return this.defaultTenant;
-      }
-      
-      console.log(`TODO: Implement tRPC call for getTenantBySlugOrDomain(${identifier})`);
-      return null;
+      const tenant = await this.trpcClient.tenants.getTenantByIdentifier.query({ identifier });
+      return tenant;
     } catch (error) {
-      console.error('Error fetching tenant by identifier:', error);
-      return null;
+      console.error(`Failed to get tenant by identifier ${identifier}:`, error);
+      throw error;
     }
   }
 
   /**
    * Create a new tenant
-   * TODO: Replace with tRPC call to backend tenant service
    */
-  async createTenant(tenantData: {
-    name: string;
-    slug: string;
-    domain?: string;
-    settings?: Tenant['settings'];
-    branding?: Tenant['branding'];
-  }): Promise<Tenant | null> {
+  public async createTenant(data: TenantCreateData): Promise<Tenant> {
     try {
-      console.log('TODO: Implement tRPC call for createTenant', tenantData);
-      
-      // For development, return a mock tenant
-      const newTenant: Tenant = {
-        id: `tenant-${Date.now()}`,
-        name: tenantData.name,
-        slug: tenantData.slug,
-        domain: tenantData.domain,
-        settings: tenantData.settings || this.defaultTenant.settings,
-        branding: tenantData.branding || this.defaultTenant.branding,
-        is_active: true,
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
-      };
-      
-      return newTenant;
+      const tenant = await this.trpcClient.tenants.createTenant.mutate(data);
+      return tenant;
     } catch (error) {
-      console.error('Error creating tenant:', error);
-      return null;
+      console.error('Failed to create tenant:', error);
+      throw error;
     }
   }
 
   /**
-   * Update tenant settings
-   * TODO: Replace with tRPC call to backend tenant service
+   * Update tenant
    */
-  async updateTenant(
-    tenantId: string,
-    updates: Partial<Pick<Tenant, 'name' | 'domain' | 'settings' | 'branding' | 'is_active'>>
-  ): Promise<Tenant | null> {
+  public async updateTenant(tenantId: string, updates: TenantUpdateData): Promise<Tenant> {
     try {
-      console.log('TODO: Implement tRPC call for updateTenant', { tenantId, updates });
-      
-      // For development, update default tenant if ID matches
-      if (tenantId === this.defaultTenant.id) {
-        const updatedTenant: Tenant = {
-          ...this.defaultTenant,
-          ...updates,
-          updated_at: new Date().toISOString(),
-        };
-        this.currentTenant = updatedTenant;
-        return updatedTenant;
-      }
-      
-      return null;
+      const tenant = await this.trpcClient.tenants.updateTenant.mutate({
+        id: tenantId,
+        data: updates
+      });
+      return tenant;
     } catch (error) {
-      console.error('Error updating tenant:', error);
-      return null;
+      console.error(`Failed to update tenant ${tenantId}:`, error);
+      throw error;
     }
   }
 
   /**
-   * Get user's tenants
-   * TODO: Replace with tRPC call to backend tenant service
+   * Get tenants for user
    */
-  async getUserTenants(userId: string): Promise<TenantUser[]> {
+  public async getUserTenants(userId: string): Promise<Tenant[]> {
     try {
-      console.log(`TODO: Implement tRPC call for getUserTenants(${userId})`);
-      
-      // For development, return default tenant user relationship
-      return [{
-        id: `tenant-user-${userId}`,
-        tenant_id: this.defaultTenant.id,
-        user_id: userId,
-        role: 'ADMIN',
-        is_active: true,
-        created_at: new Date().toISOString(),
-      }];
+      const tenants = await this.trpcClient.tenants.getUserTenants.query({ userId });
+      return tenants;
     } catch (error) {
-      console.error('Error fetching user tenants:', error);
-      return [];
+      console.error(`Failed to get tenants for user ${userId}:`, error);
+      throw error;
     }
   }
 
   /**
    * Add user to tenant
-   * TODO: Replace with tRPC call to backend tenant service
    */
-  async addUserToTenant(
-    tenantId: string,
-    userId: string,
-    role: 'ADMIN' | 'CLIENT' | 'RESELLER' = 'CLIENT'
-  ): Promise<TenantUser | null> {
+  public async addUserToTenant(tenantId: string, userId: string, role: string): Promise<TenantUser> {
     try {
-      console.log('TODO: Implement tRPC call for addUserToTenant', { tenantId, userId, role });
-      
-      // For development, return mock tenant user
-      return {
-        id: `tenant-user-${Date.now()}`,
-        tenant_id: tenantId,
-        user_id: userId,
-        role,
-        is_active: true,
-        created_at: new Date().toISOString(),
-      };
+      const tenantUser = await this.trpcClient.tenants.addUser.mutate({
+        tenantId,
+        userId,
+        role
+      });
+      return tenantUser;
     } catch (error) {
-      console.error('Error adding user to tenant:', error);
-      return null;
+      console.error(`Failed to add user ${userId} to tenant ${tenantId}:`, error);
+      throw error;
     }
   }
 
   /**
    * Remove user from tenant
-   * TODO: Replace with tRPC call to backend tenant service
    */
-  async removeUserFromTenant(tenantId: string, userId: string): Promise<boolean> {
+  public async removeUserFromTenant(tenantId: string, userId: string): Promise<void> {
     try {
-      console.log('TODO: Implement tRPC call for removeUserFromTenant', { tenantId, userId });
-      return true;
+      await this.trpcClient.tenants.removeUser.mutate({
+        tenantId,
+        userId
+      });
     } catch (error) {
-      console.error('Error removing user from tenant:', error);
-      return false;
+      console.error(`Failed to remove user ${userId} from tenant ${tenantId}:`, error);
+      throw error;
     }
   }
 
   /**
    * Check if user has access to tenant
-   * TODO: Replace with tRPC call to backend tenant service
    */
-  async hasUserAccess(tenantId: string, userId: string): Promise<boolean> {
+  public async hasUserAccess(tenantId: string, userId: string): Promise<boolean> {
     try {
-      console.log(`TODO: Implement tRPC call for hasUserAccess(${tenantId}, ${userId})`);
-      
-      // For development, allow access to default tenant
-      return tenantId === this.defaultTenant.id;
+      const result = await this.trpcClient.tenants.checkUserAccess.query({
+        tenantId,
+        userId
+      });
+      return result.hasAccess;
     } catch (error) {
-      console.error('Error checking user access:', error);
-      return false;
+      console.error(`Failed to check access for user ${userId} to tenant ${tenantId}:`, error);
+      throw error;
     }
+  }
+
+  /**
+   * Set current tenant
+   */
+  public setCurrentTenant(tenant: Tenant): void {
+    this.currentTenant = tenant;
+  }
+
+  /**
+   * Get current tenant
+   */
+  public getCurrentTenant(): Tenant | null {
+    return this.currentTenant;
+  }
+
+  /**
+   * Get current tenant ID
+   */
+  public getCurrentTenantId(): string | null {
+    return this.currentTenant?.id || null;
+  }
+
+  /**
+   * Clear current tenant
+   */
+  public clearCurrentTenant(): void {
+    this.currentTenant = null;
   }
 
   /**
@@ -297,15 +222,15 @@ export class TenantManager {
    * Check if tenant has specific feature enabled
    */
   hasFeature(feature: string): boolean {
-    const features = this.currentTenant?.settings?.features || this.defaultTenant.settings.features;
+    const features = this.currentTenant?.settings || this.defaultTenant.settings;
     return (features as any)?.[feature] || false;
   }
 
   /**
    * Get tenant limits
    */
-  getTenantLimits(): Tenant['settings']['limits'] {
-    return this.currentTenant?.settings?.limits || this.defaultTenant.settings.limits;
+  getTenantLimits(): Record<string, any> {
+    return this.currentTenant?.settings || this.defaultTenant.settings;
   }
 
   /**
@@ -325,6 +250,7 @@ export { tenantManager };
 
 // Export convenience functions
 export const getCurrentTenant = () => tenantManager.getCurrentTenant();
+export const getCurrentTenantId = () => tenantManager.getCurrentTenantId();
 export const getTenantBranding = () => tenantManager.getTenantBranding();
 export const hasFeature = (feature: string) => tenantManager.hasFeature(feature);
 export const withTenantContext = <T>(query: any) => tenantManager.withTenantContext<T>(query);

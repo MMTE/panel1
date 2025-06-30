@@ -2,8 +2,9 @@ import jwt from 'jsonwebtoken';
 import bcrypt from 'bcryptjs';
 import crypto from 'crypto';
 import { db } from '../db/index.js';
-import { users, sessions, type User, type NewUser, type NewSession } from '../db/schema/users.js';
+import { users, sessions, permissions, rolePermissions, type User, type NewUser, type NewSession } from '../db/schema/users.js';
 import { eq, and, gte, lt } from 'drizzle-orm';
+import { PermissionManager } from './auth/PermissionManager.js';
 
 const JWT_SECRET = process.env.JWT_SECRET || 'your-super-secret-jwt-key';
 const JWT_EXPIRES_IN = '7d';
@@ -14,8 +15,9 @@ export interface AuthUser {
   email: string;
   firstName?: string | null;
   lastName?: string | null;
-  role: 'ADMIN' | 'CLIENT' | 'RESELLER';
+  role: 'SUPER_ADMIN' | 'ADMIN' | 'MANAGER' | 'SUPPORT_AGENT' | 'BILLING_AGENT' | 'RESELLER' | 'CLIENT' | 'CLIENT_USER';
   tenantId?: string | null;
+  permissions?: string[];
 }
 
 export interface JWTPayload {
@@ -137,6 +139,19 @@ export async function cleanupExpiredSessions(): Promise<void> {
 }
 
 /**
+ * Load user permissions from the database
+ */
+async function loadUserPermissions(role: string): Promise<string[]> {
+  try {
+    const permissionManager = PermissionManager.getInstance();
+    return await permissionManager.getRolePermissions(role as any);
+  } catch (error) {
+    console.error('Failed to load user permissions:', error);
+    return [];
+  }
+}
+
+/**
  * Register a new user
  */
 export async function registerUser(userData: {
@@ -184,13 +199,17 @@ export async function authenticateUser(email: string, password: string): Promise
     return null;
   }
 
+  // Load user permissions
+  const userPermissions = await loadUserPermissions(user.role);
+
   return {
     id: user.id,
     email: user.email,
     firstName: user.firstName,
     lastName: user.lastName,
-    role: user.role as 'ADMIN' | 'CLIENT' | 'RESELLER',
+    role: user.role as any,
     tenantId: user.tenantId,
+    permissions: userPermissions,
   };
 }
 
@@ -211,12 +230,16 @@ export async function getUserById(id: string): Promise<AuthUser | null> {
     return null;
   }
 
+  // Load user permissions
+  const userPermissions = await loadUserPermissions(user.role);
+
   return {
     id: user.id,
     email: user.email,
     firstName: user.firstName,
     lastName: user.lastName,
-    role: user.role as 'ADMIN' | 'CLIENT' | 'RESELLER',
+    role: user.role as any,
     tenantId: user.tenantId,
+    permissions: userPermissions,
   };
 } 

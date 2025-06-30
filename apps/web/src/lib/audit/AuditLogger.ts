@@ -1,17 +1,29 @@
 // import { supabase } from '../supabase'; // TODO: Replace with tRPC
-import { tenantManager } from '../tenant/TenantManager';
+import { getCurrentTenantId } from '../tenant/TenantManager';
+import { trpc } from '../../api/trpc';
 
 export interface AuditEvent {
-  user_id?: string;
-  action_type: string;
-  resource_type: string;
-  resource_id?: string;
-  old_values?: any;
-  new_values?: any;
-  ip_address?: string;
-  user_agent?: string;
-  tenant_id?: string;
-  timestamp: string;
+  action: string;
+  category: string;
+  targetId?: string;
+  targetType?: string;
+  metadata?: Record<string, any>;
+  timestamp?: Date;
+}
+
+export interface AuditTrailOptions {
+  startDate?: Date;
+  endDate?: Date;
+  category?: string;
+  action?: string;
+  targetId?: string;
+  targetType?: string;
+  limit?: number;
+  offset?: number;
+}
+
+export interface ExportOptions extends AuditTrailOptions {
+  format: 'csv' | 'json';
 }
 
 /**
@@ -21,9 +33,11 @@ export interface AuditEvent {
  */
 export class AuditLogger {
   private static instance: AuditLogger;
-  private auditEvents: AuditEvent[] = [];
+  private trpcClient: typeof trpc;
 
-  private constructor() {}
+  private constructor() {
+    this.trpcClient = trpc;
+  }
 
   static getInstance(): AuditLogger {
     if (!AuditLogger.instance) {
@@ -33,197 +47,131 @@ export class AuditLogger {
   }
 
   /**
-   * Log an authentication event
+   * Log an auth-related audit event
    */
-  async logAuth(
-    action: 'login' | 'logout' | 'failed_login' | 'password_change' | 'impersonate' | 'failed_impersonate',
-    userId?: string,
-    metadata: any = {}
-  ): Promise<void> {
-    const event: AuditEvent = {
-      user_id: userId,
-      action_type: `auth.${action}`,
-      resource_type: 'user',
-      resource_id: userId,
-      new_values: metadata,
-      ip_address: this.getClientIP(),
-      user_agent: this.getUserAgent(),
-      timestamp: new Date().toISOString(),
-    };
-
-    await this.logEvent(event);
+  public async logAuth(action: string, userId: string = 'anonymous', metadata?: any): Promise<void> {
+    const tenantId = getCurrentTenantId();
+    return this.log({
+      action,
+      category: 'auth',
+      targetId: userId,
+      targetType: 'user',
+      metadata: {
+        ...metadata,
+        tenantId,
+      }
+    });
   }
 
   /**
-   * Log a data change event
+   * Log a data change audit event
    */
-  async logDataChange(
+  public async logDataChange(
     action: 'create' | 'update' | 'delete',
     resourceType: string,
     resourceId: string,
-    oldValues: any = null,
-    newValues: any = null
+    oldValues?: any,
+    newValues?: any,
+    userId: string = 'system'
   ): Promise<void> {
-    const event: AuditEvent = {
-      action_type: `data.${action}`,
-      resource_type: resourceType,
-      resource_id: resourceId,
-      old_values: oldValues,
-      new_values: newValues,
-      ip_address: this.getClientIP(),
-      user_agent: this.getUserAgent(),
-      timestamp: new Date().toISOString(),
-    };
-
-    await this.logEvent(event);
+    const tenantId = getCurrentTenantId();
+    return this.log({
+      action,
+      category: 'data',
+      targetId: resourceId,
+      targetType: resourceType,
+      metadata: {
+        userId,
+        tenantId,
+        oldValues,
+        newValues,
+      }
+    });
   }
 
   /**
-   * Log a system event
+   * Log a system-level audit event
    */
-  async logSystem(
-    action: string,
-    metadata: any = {}
-  ): Promise<void> {
-    const event: AuditEvent = {
-      action_type: `system.${action}`,
-      resource_type: 'system',
-      new_values: metadata,
-      ip_address: this.getClientIP(),
-      user_agent: this.getUserAgent(),
-      timestamp: new Date().toISOString(),
-    };
-
-    await this.logEvent(event);
+  public async logSystem(action: string, metadata?: any): Promise<void> {
+    const tenantId = getCurrentTenantId();
+    return this.log({
+      action,
+      category: 'system',
+      metadata: {
+        ...metadata,
+        tenantId,
+      }
+    });
   }
 
   /**
-   * Store audit event
-   * TODO: Implement with tRPC + Drizzle
+   * Log an audit event
    */
-  private async logEvent(event: AuditEvent): Promise<void> {
+  public async log(event: AuditEvent): Promise<void> {
     try {
-      // Console logging for development
-      console.log('📋 Audit Event:', event);
-      
-      // Store in memory for demo purposes
-      this.auditEvents.push(event);
-      
-      // Keep only last 1000 events in memory
-      if (this.auditEvents.length > 1000) {
-        this.auditEvents = this.auditEvents.slice(-1000);
-      }
-      
-      // TODO: Replace with tRPC call to store in PostgreSQL
-      console.log('TODO: Store audit event in database via tRPC');
-    } catch (error) {
-      console.error('Error logging audit event:', error);
-    }
-  }
-
-  /**
-   * Get audit trail for resource
-   * TODO: Implement with tRPC + Drizzle
-   */
-  async getAuditTrail(options: {
-    resourceType?: string;
-    resourceId?: string;
-    userId?: string;
-    actionType?: string;
-    startDate?: Date;
-    endDate?: Date;
-    limit?: number;
-    offset?: number;
-  } = {}): Promise<AuditEvent[]> {
-    try {
-      console.log('TODO: Fetch audit trail from database via tRPC:', options);
-      
-      // For now, return in-memory events with basic filtering
-      let filtered = [...this.auditEvents];
-      
-      if (options.resourceType) {
-        filtered = filtered.filter(e => e.resource_type === options.resourceType);
-      }
-      
-      if (options.resourceId) {
-        filtered = filtered.filter(e => e.resource_id === options.resourceId);
-      }
-      
-      if (options.userId) {
-        filtered = filtered.filter(e => e.user_id === options.userId);
-      }
-      
-      if (options.actionType) {
-        filtered = filtered.filter(e => e.action_type === options.actionType);
-      }
-      
-      // Sort by timestamp (newest first)
-      filtered.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
-      
-      // Apply limit and offset
-      const offset = options.offset || 0;
-      const limit = options.limit || filtered.length;
-      
-      return filtered.slice(offset, offset + limit);
-    } catch (error) {
-      console.error('Error fetching audit trail:', error);
-      return [];
-    }
-  }
-
-  /**
-   * Get client IP address
-   */
-  private getClientIP(): string {
-    // In a real application, this would extract from request headers
-    return '127.0.0.1';
-  }
-
-  /**
-   * Get user agent
-   */
-  private getUserAgent(): string {
-    if (typeof navigator !== 'undefined') {
-      return navigator.userAgent;
-    }
-    return 'Unknown';
-  }
-
-  /**
-   * Export audit events (for compliance)
-   * TODO: Implement with tRPC + Drizzle
-   */
-  async exportAuditEvents(options: {
-    startDate: Date;
-    endDate: Date;
-    format?: 'json' | 'csv';
-  }): Promise<string> {
-    try {
-      console.log('TODO: Export audit events via tRPC:', options);
-      
-      const events = await this.getAuditTrail({
-        startDate: options.startDate,
-        endDate: options.endDate,
+      await this.trpcClient.audit.logEvent.mutate({
+        action: event.action,
+        category: event.category,
+        targetId: event.targetId,
+        targetType: event.targetType,
+        metadata: event.metadata || {},
+        timestamp: event.timestamp || new Date()
       });
-      
-      if (options.format === 'csv') {
-        // Simple CSV export
-        const headers = ['timestamp', 'action_type', 'resource_type', 'resource_id', 'user_id'];
-        const rows = events.map(event => [
-          event.timestamp,
-          event.action_type,
-          event.resource_type,
-          event.resource_id || '',
-          event.user_id || ''
-        ]);
-        
-        return [headers, ...rows].map(row => row.join(',')).join('\n');
-      } else {
-        return JSON.stringify(events, null, 2);
-      }
     } catch (error) {
-      console.error('Error exporting audit events:', error);
-      return '';
+      console.error('Failed to log audit event:', error);
+      // Don't throw the error - we don't want audit logging failures to break the app
+      // Just log it to the console
+    }
+  }
+
+  /**
+   * Get audit trail with filtering options
+   */
+  public async getAuditTrail(options: AuditTrailOptions = {}): Promise<AuditEvent[]> {
+    try {
+      const result = await this.trpcClient.audit.getAuditTrail.query({
+        startDate: options.startDate?.toISOString(),
+        endDate: options.endDate?.toISOString(),
+        category: options.category,
+        action: options.action,
+        targetId: options.targetId,
+        targetType: options.targetType,
+        limit: options.limit || 50,
+        offset: options.offset || 0
+      });
+
+      return result.events;
+    } catch (error) {
+      console.error('Failed to fetch audit trail:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Export audit events in specified format
+   */
+  public async exportAuditEvents(options: ExportOptions): Promise<Blob> {
+    try {
+      const response = await this.trpcClient.audit.exportAuditTrail.query({
+        format: options.format,
+        startDate: options.startDate?.toISOString(),
+        endDate: options.endDate?.toISOString(),
+        category: options.category,
+        action: options.action,
+        targetId: options.targetId,
+        targetType: options.targetType
+      });
+
+      // Convert the response to a Blob
+      const blob = new Blob(
+        [options.format === 'csv' ? response.csv : JSON.stringify(response.json, null, 2)],
+        { type: options.format === 'csv' ? 'text/csv' : 'application/json' }
+      );
+
+      return blob;
+    } catch (error) {
+      console.error('Failed to export audit events:', error);
+      throw error;
     }
   }
 }
@@ -234,10 +182,10 @@ const auditLogger = AuditLogger.getInstance();
 export { auditLogger };
 
 // Convenience functions with tenant context
-export const logAuth = (action: 'login' | 'logout' | 'failed_login' | 'impersonate' | 'failed_impersonate', userId?: string, metadata?: any) =>
+export const logAuth = async (action: string, userId: string = 'anonymous', metadata?: any) =>
   auditLogger.logAuth(action, userId, metadata);
 
-export const logDataChange = (
+export const logDataChange = async (
   action: 'create' | 'update' | 'delete',
   resourceType: string,
   resourceId: string,
@@ -246,10 +194,8 @@ export const logDataChange = (
   userId?: string
 ) => auditLogger.logDataChange(action, resourceType, resourceId, oldValues, newValues, userId);
 
-export const logSystem = (
-  action: string,
-  metadata?: any
-) => auditLogger.logSystem(action, metadata);
+export const logSystem = async (action: string, metadata?: any) =>
+  auditLogger.logSystem(action, metadata);
 
 export const exportAuditEvents = (
   startDate: Date,

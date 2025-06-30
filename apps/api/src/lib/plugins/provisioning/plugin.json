@@ -1,0 +1,167 @@
+{
+  "id": "cpanel-plugin",
+  "name": "cPanel/WHM Plugin",
+  "version": "2.0.0",
+  "description": "Enhanced cPanel and WHM hosting control panel integration",
+  "author": "Panel1 Team",
+  "tags": ["provisioning", "hosting", "cpanel", "whm"],
+  "defaultConfig": {
+    "enabled": true,
+    "servers": {
+      "server1": {
+        "hostname": "whm1.panel1.com",
+        "port": 2087,
+        "username": "root",
+        "useSSL": true,
+        "verifySSL": true,
+        "timeout": 30000,
+        "retries": 3,
+        "maxAccounts": 1000
+      }
+    },
+    "packages": {
+      "starter": {
+        "diskQuota": 5120,
+        "bandwidth": 51200,
+        "emailAccounts": 10,
+        "databases": 5,
+        "subdomains": 5,
+        "features": [
+          "cpanel",
+          "email",
+          "ftp",
+          "mysql",
+          "php"
+        ]
+      },
+      "business": {
+        "diskQuota": 15360,
+        "bandwidth": 153600,
+        "emailAccounts": 50,
+        "databases": 20,
+        "subdomains": 20,
+        "features": [
+          "cpanel",
+          "email",
+          "ftp",
+          "mysql",
+          "php",
+          "ssl",
+          "cron",
+          "ssh"
+        ]
+      },
+      "premium": {
+        "diskQuota": 51200,
+        "bandwidth": 512000,
+        "emailAccounts": -1,
+        "databases": -1,
+        "subdomains": -1,
+        "features": [
+          "cpanel",
+          "email",
+          "ftp",
+          "mysql",
+          "php",
+          "ssl",
+          "cron",
+          "ssh",
+          "nodejs",
+          "python",
+          "ruby"
+        ]
+      }
+    },
+    "defaultServer": "server1",
+    "defaultPackage": "starter",
+    "loadBalancing": {
+      "enabled": true,
+      "strategy": "least-loaded"
+    },
+    "monitoring": {
+      "enabled": true,
+      "interval": 300000,
+      "metrics": [
+        "load",
+        "memory",
+        "disk",
+        "bandwidth",
+        "accounts"
+      ]
+    },
+    "backups": {
+      "enabled": true,
+      "retention": 7,
+      "schedule": "0 0 * * *"
+    }
+  },
+  "dependencies": {},
+  "hooks": [
+    {
+      "event": "account.created",
+      "priority": 10
+    },
+    {
+      "event": "account.suspended",
+      "priority": 10
+    },
+    {
+      "event": "account.unsuspended",
+      "priority": 10
+    },
+    {
+      "event": "account.terminated",
+      "priority": 10
+    },
+    {
+      "event": "server.overload",
+      "priority": 10
+    },
+    {
+      "event": "backup.completed",
+      "priority": 10
+    },
+    {
+      "event": "backup.failed",
+      "priority": 10
+    }
+  ],
+  "extensionPoints": [
+    {
+      "id": "cpanel-package",
+      "description": "Define custom cPanel hosting packages",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "name": { "type": "string" },
+          "resources": {
+            "type": "object",
+            "properties": {
+              "diskQuota": { "type": "number" },
+              "bandwidth": { "type": "number" },
+              "emailAccounts": { "type": "number" },
+              "databases": { "type": "number" },
+              "subdomains": { "type": "number" },
+              "features": { "type": "array", "items": { "type": "string" } }
+            },
+            "required": ["diskQuota", "bandwidth"]
+          }
+        },
+        "required": ["name", "resources"]
+      }
+    },
+    {
+      "id": "server-monitoring",
+      "description": "Add custom server monitoring metrics",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "name": { "type": "string" },
+          "collector": { "type": "function" },
+          "interval": { "type": "number" }
+        },
+        "required": ["name", "collector"]
+      }
+    }
+  ]
+} 

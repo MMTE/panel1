@@ -122,7 +122,7 @@ export class SlaManager {
   }
 
   /**
-   * Calculate SLA due dates for a ticket
+   * Calculate SLA due dates for a ticket, respecting business hours
    */
   calculateSlaDueDates(
     createdAt: Date,
@@ -133,13 +133,9 @@ export class SlaManager {
   } {
     const businessHours = slaProfile.businessHours;
     
-    // For now, use simple calculation (will enhance with business hours later)
-    const firstResponseDue = new Date(createdAt.getTime() + slaProfile.firstResponseTime * 60000);
-    const resolutionDue = new Date(createdAt.getTime() + slaProfile.resolutionTime * 60000);
-
-    // TODO: Implement business hours calculation
-    // const firstResponseDue = this.addBusinessMinutes(createdAt, slaProfile.firstResponseTime, businessHours);
-    // const resolutionDue = this.addBusinessMinutes(createdAt, slaProfile.resolutionTime, businessHours);
+    // Calculate due dates respecting business hours
+    const firstResponseDue = this.addBusinessMinutes(createdAt, slaProfile.firstResponseTime, businessHours);
+    const resolutionDue = this.addBusinessMinutes(createdAt, slaProfile.resolutionTime, businessHours);
 
     return {
       firstResponseDue,
@@ -346,33 +342,102 @@ export class SlaManager {
     minutes: number,
     businessHours: BusinessHours
   ): Date {
-    // This would implement business hours calculation
-    // For now, return simple addition
-    return new Date(startDate.getTime() + minutes * 60000);
-  }
+    const tz = businessHours.timezone || 'UTC';
+    let currentDate = new Date(startDate);
+    let remainingMinutes = minutes;
 
-  /**
-   * Check if a given time is within business hours
-   */
-  private isWithinBusinessHours(date: Date, businessHours: BusinessHours): boolean {
-    const dayNames = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
-    const dayName = dayNames[date.getDay()] as keyof BusinessHours;
-    const dayConfig = businessHours[dayName];
+    while (remainingMinutes > 0) {
+      // If current time is outside business hours, move to next business hour start
+      if (!this.isWithinBusinessHours(currentDate, businessHours)) {
+        currentDate = this.getNextBusinessHourStart(currentDate, businessHours);
+        continue;
+      }
 
-    if (!dayConfig || !dayConfig.enabled) {
-      return false;
+      // Get end of current business day
+      const dayOfWeek = currentDate.toLocaleDateString('en-US', { weekday: 'lowercase', timeZone: tz });
+      const dayHours = businessHours[dayOfWeek as keyof typeof businessHours] as { start: string; end: string; enabled: boolean };
+      
+      if (!dayHours.enabled) {
+        // Move to next day if current day is disabled
+        currentDate.setDate(currentDate.getDate() + 1);
+        currentDate.setHours(0, 0, 0, 0);
+        continue;
+      }
+
+      const [endHour, endMinute] = dayHours.end.split(':').map(Number);
+      const endOfBusinessDay = new Date(currentDate);
+      endOfBusinessDay.setHours(endHour, endMinute, 0, 0);
+
+      // Calculate minutes until end of business day
+      const minutesUntilEndOfDay = Math.floor((endOfBusinessDay.getTime() - currentDate.getTime()) / 60000);
+
+      if (minutesUntilEndOfDay >= remainingMinutes) {
+        // We can add all remaining minutes
+        currentDate = new Date(currentDate.getTime() + remainingMinutes * 60000);
+        remainingMinutes = 0;
+      } else {
+        // Add minutes until end of day and continue to next day
+        currentDate = new Date(endOfBusinessDay);
+        remainingMinutes -= minutesUntilEndOfDay;
+        currentDate.setDate(currentDate.getDate() + 1);
+        currentDate.setHours(0, 0, 0, 0);
+      }
     }
 
-    const timeString = date.toTimeString().substring(0, 5); // HH:MM format
-    return timeString >= dayConfig.start && timeString <= dayConfig.end;
+    return currentDate;
   }
 
-  /**
-   * Get the next business hour start time
-   */
+  private isWithinBusinessHours(date: Date, businessHours: BusinessHours): boolean {
+    const tz = businessHours.timezone || 'UTC';
+    const dayOfWeek = date.toLocaleDateString('en-US', { weekday: 'lowercase', timeZone: tz });
+    const dayHours = businessHours[dayOfWeek as keyof typeof businessHours] as { start: string; end: string; enabled: boolean };
+
+    if (!dayHours.enabled) return false;
+
+    const [startHour, startMinute] = dayHours.start.split(':').map(Number);
+    const [endHour, endMinute] = dayHours.end.split(':').map(Number);
+
+    const businessStart = new Date(date);
+    businessStart.setHours(startHour, startMinute, 0, 0);
+
+    const businessEnd = new Date(date);
+    businessEnd.setHours(endHour, endMinute, 0, 0);
+
+    return date >= businessStart && date <= businessEnd;
+  }
+
   private getNextBusinessHourStart(date: Date, businessHours: BusinessHours): Date {
-    // Implementation would find the next business hour start
-    // For now, return the input date
-    return date;
+    const tz = businessHours.timezone || 'UTC';
+    let currentDate = new Date(date);
+    
+    // Try next 7 days (to avoid infinite loop in case all days are disabled)
+    for (let i = 0; i < 7; i++) {
+      const dayOfWeek = currentDate.toLocaleDateString('en-US', { weekday: 'lowercase', timeZone: tz });
+      const dayHours = businessHours[dayOfWeek as keyof typeof businessHours] as { start: string; end: string; enabled: boolean };
+
+      if (dayHours.enabled) {
+        const [startHour, startMinute] = dayHours.start.split(':').map(Number);
+        const businessStart = new Date(currentDate);
+        businessStart.setHours(startHour, startMinute, 0, 0);
+
+        if (currentDate < businessStart) {
+          return businessStart;
+        }
+
+        const [endHour, endMinute] = dayHours.end.split(':').map(Number);
+        const businessEnd = new Date(currentDate);
+        businessEnd.setHours(endHour, endMinute, 0, 0);
+
+        if (currentDate <= businessEnd) {
+          return currentDate;
+        }
+      }
+
+      // Move to next day
+      currentDate.setDate(currentDate.getDate() + 1);
+      currentDate.setHours(0, 0, 0, 0);
+    }
+
+    throw new Error('No business hours found in the next 7 days');
   }
 } 

@@ -10,6 +10,9 @@ import {
   NewPaymentAttempt 
 } from '../../db/schema';
 import { eq, and } from 'drizzle-orm';
+import { PaymentError, NotFoundError, ConflictError } from '../../lib/errors';
+import { logger } from '../../lib/logging/Logger';
+import { retryManager, RetryManager } from '../../lib/resilience/RetryManager';
 
 export interface CreatePaymentParams {
   invoiceId: string;
@@ -51,17 +54,32 @@ export class PaymentService {
    * Process a payment for an invoice
    */
   async processPayment(params: CreatePaymentParams): Promise<PaymentResult> {
-    console.log(`🔄 Processing payment for invoice ${params.invoiceId}`);
+    const correlationId = `payment_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    const operationLogger = logger.logOperation('processPayment', {
+      correlationId,
+      invoiceId: params.invoiceId,
+      tenantId: params.tenantId,
+      paymentMethodType: params.paymentMethodType,
+    });
 
-    // Get invoice details
-    const invoice = await this.getInvoice(params.invoiceId);
-    if (!invoice) {
-      throw new Error('Invoice not found');
-    }
+    operationLogger.info('Starting payment processing');
 
-    if (invoice.status === 'PAID') {
-      throw new Error('Invoice is already paid');
-    }
+    try {
+      // Get invoice details
+      const invoice = await this.getInvoice(params.invoiceId);
+      if (!invoice) {
+        throw new NotFoundError('Invoice not found', {
+          invoiceId: params.invoiceId,
+          tenantId: params.tenantId,
+        });
+      }
+
+      if (invoice.status === 'PAID') {
+        throw new ConflictError('Invoice is already paid', {
+          invoiceId: params.invoiceId,
+          status: invoice.status,
+        });
+      }
 
     // Create payment context for gateway selection
     const paymentContext: PaymentContext = {
@@ -73,26 +91,37 @@ export class PaymentService {
       isRecurring: false, // TODO: Determine from subscription
     };
 
-    // Get the best gateway for this payment
-    const gateway = await this.gatewayManager.getBestGateway(paymentContext);
-    console.log(`💳 Selected gateway: ${gateway.displayName}`);
+      // Get the best gateway for this payment
+      const gateway = await this.gatewayManager.getBestGateway(paymentContext);
+      operationLogger.info('Payment gateway selected', {
+        gateway: gateway.displayName,
+        gatewayName: gateway.name,
+      });
 
-    // Initialize gateway with tenant configuration
-    const gatewayConfig = await this.gatewayManager.getGatewayConfig(
-      params.tenantId, 
-      gateway.name
-    );
-    
-    if (!gatewayConfig) {
-      throw new Error(`Gateway ${gateway.name} not configured for tenant`);
-    }
+      // Initialize gateway with tenant configuration
+      const gatewayConfig = await this.gatewayManager.getGatewayConfig(
+        params.tenantId, 
+        gateway.name
+      );
+      
+      if (!gatewayConfig) {
+        throw new PaymentError(
+          `Gateway ${gateway.name} not configured for tenant`,
+          'GATEWAY_NOT_CONFIGURED',
+          {
+            gatewayName: gateway.name,
+            tenantId: params.tenantId,
+          }
+        );
+      }
 
-    await gateway.initialize(gatewayConfig.config as any);
+      await gateway.initialize(gatewayConfig.config as any);
 
-    // Record payment attempt
-    const attemptNumber = await this.getNextAttemptNumber(params.invoiceId, gateway.name);
+      // Record payment attempt
+      const attemptNumber = await this.getNextAttemptNumber(params.invoiceId, gateway.name);
 
-    try {
+      return await retryManager.executeWithRetryAndCircuitBreaker(
+        async () => {
       // Create payment intent with gateway
       const paymentIntent = await gateway.createPaymentIntent({
         amount: parseFloat(invoice.total),
@@ -132,20 +161,28 @@ export class PaymentService {
         gatewayResponse: paymentIntent.gatewayData,
       });
 
-      console.log(`✅ Payment created: ${payment.id}`);
+          operationLogger.success('Payment created successfully', {
+            paymentId: payment.id,
+            gateway: gateway.name,
+            status: paymentIntent.status,
+          });
 
-      return {
-        payment,
-        clientSecret: paymentIntent.clientSecret,
-        gateway: gateway.name,
-        requiresAction: paymentIntent.requiresAction || false,
-        nextActionUrl: paymentIntent.nextAction?.redirectUrl,
-        status: paymentIntent.status,
-      };
+          return {
+            payment,
+            clientSecret: paymentIntent.clientSecret,
+            gateway: gateway.name,
+            requiresAction: paymentIntent.requiresAction || false,
+            nextActionUrl: paymentIntent.nextAction?.redirectUrl,
+            status: paymentIntent.status,
+          };
+        },
+        RetryManager.PAYMENT_CONFIG,
+        `payment_gateway_${gateway.name}`,
+        RetryManager.PAYMENT_CIRCUIT_CONFIG,
+        'createPaymentIntent'
+      );
 
     } catch (error) {
-      console.error(`❌ Payment processing failed:`, error);
-
       // Record failed attempt
       await this.recordPaymentAttempt({
         paymentId: 'temp-id', // We don't have a payment ID yet
@@ -156,7 +193,25 @@ export class PaymentService {
         gatewayResponse: { error: error instanceof Error ? error.message : 'Unknown error' },
       });
 
-      throw error;
+      const paymentError = new PaymentError(
+        `Payment processing failed: ${error instanceof Error ? error.message : 'Unknown error'}`,
+        'PROCESSING_FAILED',
+        {
+          correlationId,
+          tenantId: params.tenantId,
+          invoiceId: params.invoiceId,
+          gateway: gateway.name,
+          originalError: error instanceof Error ? error.message : 'Unknown error',
+        },
+        this.isRetryablePaymentError(error as Error)
+      );
+
+      operationLogger.failure(paymentError, {
+        gateway: gateway.name,
+        attemptNumber,
+      });
+
+      throw paymentError;
     }
   }
 
@@ -367,5 +422,26 @@ export class PaymentService {
     if (payment) {
       await this.updatePaymentStatus(payment.id, result.status, result.data);
     }
+  }
+
+  /**
+   * Determine if a payment error is retryable
+   */
+  private isRetryablePaymentError(error: Error): boolean {
+    const retryableMessages = [
+      'timeout',
+      'network',
+      'temporary',
+      'rate_limit',
+      'service_unavailable',
+      'connection',
+      'ECONNRESET',
+      'ENOTFOUND',
+      'ETIMEDOUT',
+    ];
+    
+    return retryableMessages.some(msg => 
+      error.message.toLowerCase().includes(msg)
+    );
   }
 } 

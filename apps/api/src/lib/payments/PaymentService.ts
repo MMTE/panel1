@@ -2,6 +2,10 @@ import { db } from '../../db';
 import { PaymentGatewayManager } from './core/PaymentGatewayManager';
 import { StripeGateway } from './gateways/StripeGateway';
 import { PaymentGateway, PaymentContext, RefundParams, RefundResult } from './interfaces/PaymentGateway';
+import { EventService } from '../events/EventService';
+import { Logger } from '../logging/Logger';
+import { payments } from '../../db/schema';
+import { eq, and } from 'drizzle-orm';
 
 /**
  * Centralized Payment Service
@@ -11,6 +15,8 @@ export class PaymentService {
   private static instance: PaymentService;
   private gatewayManager: PaymentGatewayManager;
   private initialized = false;
+  private eventService = EventService.getInstance();
+  private logger = Logger.getInstance();
 
   private constructor() {
     this.gatewayManager = new PaymentGatewayManager(db);
@@ -186,6 +192,128 @@ export class PaymentService {
     }
 
     return await this.gatewayManager.getAvailableGateways(tenantId);
+  }
+
+  /**
+   * Update payment status and emit corresponding events
+   */
+  async updatePaymentStatus(
+    tenantId: string,
+    paymentId: string,
+    status: 'PENDING' | 'PROCESSING' | 'COMPLETED' | 'FAILED',
+    metadata?: Record<string, any>
+  ): Promise<void> {
+    try {
+      // Update payment status in database
+      await db
+        .update(payments)
+        .set({
+          status,
+          updatedAt: new Date(),
+          metadata: metadata || {},
+        })
+        .where(
+          and(
+            eq(payments.id, paymentId),
+            eq(payments.tenantId, tenantId)
+          )
+        );
+
+      // Get payment details for event emission
+      const [payment] = await db
+        .select()
+        .from(payments)
+        .where(
+          and(
+            eq(payments.id, paymentId),
+            eq(payments.tenantId, tenantId)
+          )
+        )
+        .limit(1);
+
+      if (!payment) {
+        throw new Error('Payment not found after update');
+      }
+
+      // Emit appropriate event based on status
+      switch (status) {
+        case 'COMPLETED':
+          await this.eventService.emit('payment.succeeded', {
+            paymentId: payment.id,
+            invoiceId: payment.invoiceId,
+            tenantId: payment.tenantId,
+            amount: parseFloat(payment.amount),
+            currency: payment.currency,
+            gatewayPaymentId: payment.gatewayPaymentId || payment.gatewayId,
+            metadata: payment.metadata,
+          });
+          this.logger.info(`Payment ${paymentId} marked as completed and event emitted`);
+          break;
+
+        case 'FAILED':
+          await this.eventService.emit('payment.failed', {
+            paymentId: payment.id,
+            invoiceId: payment.invoiceId,
+            tenantId: payment.tenantId,
+            errorCode: metadata?.errorCode,
+            errorMessage: metadata?.errorMessage,
+            metadata: payment.metadata,
+          });
+          this.logger.info(`Payment ${paymentId} marked as failed and event emitted`);
+          break;
+
+        default:
+          this.logger.info(`Payment ${paymentId} status updated to ${status}`);
+          break;
+      }
+    } catch (error) {
+      this.logger.error(`Failed to update payment status for payment ${paymentId}:`, error);
+      throw error;
+    }
+  }
+
+  /**
+   * Handle webhook from payment gateway
+   */
+  async handleWebhook(
+    gatewayName: string,
+    payload: any,
+    signature: string
+  ): Promise<void> {
+    if (!this.initialized) {
+      await this.initialize();
+    }
+
+    try {
+      const gateway = await this.gatewayManager.getGateway(gatewayName);
+      if (!gateway) {
+        throw new Error(`Gateway ${gatewayName} not found`);
+      }
+
+      // Verify webhook signature
+      if (!gateway.verifyWebhookSignature(JSON.stringify(payload), signature)) {
+        throw new Error('Invalid webhook signature');
+      }
+
+      // Process the webhook
+      const result = await gateway.handleWebhook(payload);
+
+      if (result.processed && result.paymentId && result.status) {
+        // Update payment status based on webhook result
+        await this.updatePaymentStatus(
+          result.data?.metadata?.tenantId || '',
+          result.paymentId,
+          result.status === 'succeeded' ? 'COMPLETED' : 
+          result.status === 'failed' ? 'FAILED' : 'PROCESSING',
+          result.data
+        );
+      }
+
+      this.logger.info(`Webhook processed successfully for gateway ${gatewayName}`);
+    } catch (error) {
+      this.logger.error(`Failed to process webhook for gateway ${gatewayName}:`, error);
+      throw error;
+    }
   }
 }
 

@@ -1,25 +1,133 @@
-import React from 'react';
-import { NavLink } from 'react-router-dom';
-import { 
-  LayoutDashboard, 
-  Users, 
-  CreditCard, 
-  FileText, 
-  Settings, 
-  Package,
-  BarChart3,
-  Code,
-  X,
-  Building,
-  UserCheck,
-  MessageSquare,
+import React, { useEffect, useState } from 'react';
+import { Link, useLocation } from 'react-router-dom';
+import {
+  LayoutDashboard,
+  Users,
+  FileText,
+  CreditCard,
+  Settings,
+  Box,
   Globe,
   Shield,
   Server,
-  Database
+  BarChart,
+  MessageSquare,
+  Building,
+  History,
+  Code,
+  X,
+  Package,
+  LifeBuoy,
+  ChevronDown,
+  ChevronRight,
 } from 'lucide-react';
+import { useNavigation } from '../../hooks/useNavigation';
 import { PluginSlot } from '../../lib/plugins';
 import { useAuth } from '../../hooks/useAuth';
+import { Can } from '../auth/Can';
+
+const defaultNavigation = [
+  {
+    id: 'dashboard',
+    label: 'Dashboard',
+    path: '/admin',
+    icon: LayoutDashboard,
+    requiredPermission: 'analytics.read',
+  },
+  {
+    id: 'clients',
+    label: 'Clients',
+    path: '/admin/clients',
+    icon: Users,
+    requiredPermission: 'client.read',
+  },
+  {
+    id: 'invoices',
+    label: 'Invoices',
+    path: '/admin/invoices',
+    icon: FileText,
+    requiredPermission: 'invoice.read',
+  },
+  {
+    id: 'subscriptions',
+    label: 'Subscriptions',
+    path: '/admin/subscriptions',
+    icon: CreditCard,
+    requiredPermission: 'subscription.read',
+  },
+  {
+    id: 'catalog',
+    label: 'Product Catalog',
+    path: '/admin/catalog',
+    icon: Box,
+    requiredPermission: 'plan.read',
+  },
+  {
+    id: 'domains',
+    label: 'Domains',
+    path: '/admin/domains',
+    icon: Globe,
+    requiredPermission: 'domain.read',
+  },
+  {
+    id: 'ssl',
+    label: 'SSL Certificates',
+    path: '/admin/ssl',
+    icon: Shield,
+    requiredPermission: 'ssl_certificate.read',
+  },
+  {
+    id: 'servers',
+    label: 'Servers',
+    path: '/admin/servers',
+    icon: Server,
+    requiredPermission: 'server.read',
+  },
+  {
+    id: 'analytics',
+    label: 'Analytics',
+    path: '/admin/analytics',
+    icon: BarChart,
+    requiredPermission: 'analytics.read',
+  },
+  {
+    id: 'support',
+    label: 'Support',
+    path: '/admin/support',
+    icon: MessageSquare,
+    requiredPermission: 'support_ticket.read',
+  },
+  {
+    id: 'tenants',
+    label: 'Tenants',
+    path: '/admin/tenants',
+    icon: Building,
+    requiredPermission: 'tenant.read',
+  },
+  {
+    id: 'audit-logs',
+    label: 'Audit Logs',
+    path: '/admin/audit-logs',
+    icon: History,
+    requiredPermission: 'audit_log.read',
+  },
+  {
+    id: 'settings',
+    label: 'Settings',
+    path: '/admin/settings',
+    icon: Settings,
+    requiredPermission: 'system_settings.read',
+  },
+];
+
+interface MenuItem {
+  id: string;
+  label: string;
+  path?: string;
+  icon?: React.ComponentType<{ className?: string }>;
+  items?: MenuItem[];
+  requiredPermission?: string;
+}
 
 interface AdminSidebarProps {
   isOpen?: boolean;
@@ -27,86 +135,86 @@ interface AdminSidebarProps {
 }
 
 export function AdminSidebar({ isOpen = true, onClose }: AdminSidebarProps) {
+  const location = useLocation();
+  const { filteredNavigation } = useNavigation({ navigation: defaultNavigation });
   const { user } = useAuth();
+  const [navigation, setNavigation] = useState<MenuItem[]>([]);
+  const [expandedItems, setExpandedItems] = useState<Set<string>>(new Set());
 
-  const navigationItems = [
-    {
-      name: 'Dashboard',
-      href: '/admin',
-      icon: LayoutDashboard,
-      end: true
-    },
-    {
-      name: 'Users',
-      href: '/admin/users',
-      icon: Users
-    },
-    {
-      name: 'Clients',
-      href: '/admin/clients',
-      icon: UserCheck
-    },
-    {
-      name: 'Support',
-      href: '/admin/support',
-      icon: MessageSquare
-    },
-    {
-      name: 'Billing',
-      href: '/admin/billing',
-      icon: CreditCard
-    },
-    {
-      name: 'Invoices',
-      href: '/admin/invoices',
-      icon: FileText
-    },
-    {
-      name: 'Plans',
-      href: '/admin/plans',
-      icon: Package
-    },
-    {
-      name: 'Domains',
-      href: '/admin/domains',
-      icon: Globe
-    },
-    {
-      name: 'SSL Certificates',
-      href: '/admin/ssl',
-      icon: Shield
-    },
-    {
-      name: 'Provisioning',
-      href: '/admin/provisioning',
-      icon: Server
-    },
-    {
-      name: 'Payment Gateways',
-      href: '/admin/payment-gateways',
-      icon: CreditCard
-    },
-    {
-      name: 'Analytics',
-      href: '/admin/analytics',
-      icon: BarChart3
-    },
-    {
-      name: 'Plugins',
-      href: '/admin/plugins',
-      icon: Code
-    },
-    {
-      name: 'Tenants',
-      href: '/admin/tenants',
-      icon: Building
-    },
-    {
-      name: 'Audit Logs',
-      href: '/admin/audit-logs',
-      icon: Database
+  useEffect(() => {
+    // Load and set the filtered navigation
+    const loadNavigation = async () => {
+      const filtered = await filteredNavigation;
+      setNavigation(filtered);
+    };
+    loadNavigation();
+  }, [filteredNavigation]);
+
+  const toggleExpanded = (label: string) => {
+    const newExpanded = new Set(expandedItems);
+    if (newExpanded.has(label)) {
+      newExpanded.delete(label);
+    } else {
+      newExpanded.add(label);
     }
-  ];
+    setExpandedItems(newExpanded);
+  };
+
+  const isActive = (path: string) => {
+    return location.pathname === path || location.pathname.startsWith(`${path}/`);
+  };
+
+  const renderMenuItem = (item: MenuItem) => {
+    const hasSubItems = item.items && item.items.length > 0;
+    const isExpanded = expandedItems.has(item.label);
+    const active = item.path ? isActive(item.path) : false;
+    const Icon = item.icon;
+
+    return (
+      <div key={item.id} className="space-y-1">
+        {item.path ? (
+          <Link
+            to={item.path}
+            className={`flex items-center px-4 py-2 text-sm rounded-md transition-colors ${
+              active
+                ? 'bg-blue-100 text-blue-700'
+                : 'text-gray-700 hover:bg-gray-100'
+            }`}
+          >
+            {Icon && <Icon className="w-5 h-5 mr-3" />}
+            {item.label}
+          </Link>
+        ) : (
+          <button
+            onClick={() => toggleExpanded(item.label)}
+            className={`flex items-center justify-between w-full px-4 py-2 text-sm rounded-md transition-colors ${
+              active ? 'bg-blue-100 text-blue-700' : 'text-gray-700 hover:bg-gray-100'
+            }`}
+          >
+            <div className="flex items-center">
+              {Icon && <Icon className="w-5 h-5 mr-3" />}
+              {item.label}
+            </div>
+            {hasSubItems && (
+              <span className="ml-auto">
+                {isExpanded ? (
+                  <ChevronDown className="w-4 h-4" />
+                ) : (
+                  <ChevronRight className="w-4 h-4" />
+                )}
+              </span>
+            )}
+          </button>
+        )}
+
+        {hasSubItems && isExpanded && (
+          <div className="ml-4 pl-4 border-l border-gray-200 space-y-1">
+            {item.items.map(subItem => renderMenuItem(subItem))}
+          </div>
+        )}
+      </div>
+    );
+  };
 
   return (
     <>
@@ -120,12 +228,12 @@ export function AdminSidebar({ isOpen = true, onClose }: AdminSidebarProps) {
 
       {/* Sidebar */}
       <aside className={`
-        fixed top-0 left-0 z-50 h-full w-64 bg-white border-r border-gray-200 transform transition-transform duration-300 ease-in-out
+        fixed top-0 left-0 z-50 h-full w-64 bg-white border-r border-gray-200 transform transition-transform duration-300 ease-in-out flex flex-col
         lg:relative lg:translate-x-0 lg:z-auto
         ${isOpen ? 'translate-x-0' : '-translate-x-full'}
       `}>
         {/* Header */}
-        <div className="flex items-center justify-between p-6 border-b border-gray-200">
+        <div className="flex-none flex items-center justify-between p-6 border-b border-gray-200">
           <div className="flex items-center space-x-2">
             <div className="w-8 h-8 bg-gradient-to-r from-purple-500 to-pink-500 rounded-lg flex items-center justify-center">
               <Code className="w-5 h-5 text-white" />
@@ -144,29 +252,15 @@ export function AdminSidebar({ isOpen = true, onClose }: AdminSidebarProps) {
           </button>
         </div>
 
-        {/* Navigation */}
-        <nav className="flex-1 px-4 py-6 space-y-2">
-          {navigationItems.map((item) => (
-            <NavLink
-              key={item.name}
-              to={item.href}
-              end={item.end}
-              onClick={onClose} // Close mobile menu on navigation
-              className={({ isActive }) =>
-                `flex items-center space-x-3 px-3 py-2 rounded-lg transition-colors ${
-                  isActive
-                    ? 'bg-gradient-to-r from-purple-500 to-pink-500 text-white'
-                    : 'text-gray-700 hover:bg-gray-100'
-                }`
-              }
-            >
-              <item.icon className="w-5 h-5" />
-              <span className="font-medium">{item.name}</span>
-            </NavLink>
-          ))}
+        {/* Navigation - Using flex-1 to fill available space */}
+        <nav className="flex-1 flex flex-col overflow-y-auto">
+          {/* Main navigation items */}
+          <div className="flex-1 px-4 py-6 space-y-2">
+            {navigation.map(item => renderMenuItem(item))}
+          </div>
 
           {/* Plugin Navigation Slot */}
-          <div className="pt-4 border-t border-gray-200">
+          <div className="flex-none px-4 pt-4 border-t border-gray-200">
             <PluginSlot 
               slotId="admin.nav.sidebar" 
               props={{ user, onNavigate: onClose }}
@@ -176,22 +270,12 @@ export function AdminSidebar({ isOpen = true, onClose }: AdminSidebarProps) {
         </nav>
 
         {/* Footer */}
-        <div className="p-4 border-t border-gray-200">
+        <div className="flex-none p-4 border-t border-gray-200">
           <PluginSlot 
             slotId="admin.nav.footer" 
             props={{ user }}
             className="space-y-2"
           />
-          
-          <div className="flex items-center space-x-3 px-3 py-2">
-            <Settings className="w-5 h-5 text-gray-400" />
-            <NavLink
-              to="/admin/settings"
-              className="text-gray-700 hover:text-gray-900 font-medium"
-            >
-              Settings
-            </NavLink>
-          </div>
         </div>
       </aside>
     </>

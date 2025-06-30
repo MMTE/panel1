@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { router, protectedProcedure, adminProcedure, tenantProcedure } from '../trpc/trpc.js';
+import { router, protectedProcedure, adminProcedure, tenantProcedure, requirePermission } from '../trpc/trpc.js';
 import { db, clients, users } from '../db/index.js';
 import { eq, and, desc, count, ilike, or } from 'drizzle-orm';
 import { TRPCError } from '@trpc/server';
@@ -14,65 +14,89 @@ export const clientsRouter = router({
       role: z.enum(['CLIENT', 'RESELLER']).optional(),
     }))
     .query(async ({ input, ctx }) => {
-      const { limit, offset, search, role } = input;
-
-      let whereConditions = [eq(clients.tenantId, ctx.tenantId!)];
-
-      if (search) {
-        whereConditions.push(
-          or(
-            ilike(clients.companyName, `%${search}%`),
-            ilike(users.email, `%${search}%`),
-            ilike(users.firstName, `%${search}%`),
-            ilike(users.lastName, `%${search}%`)
-          )!
-        );
+      // Ensure tenant context
+      if (!ctx.tenantId) {
+        throw new TRPCError({
+          code: 'FORBIDDEN',
+          message: 'Tenant context is required',
+        });
       }
 
-      if (role) {
-        whereConditions.push(eq(users.role, role));
+      try {
+        const { limit, offset, search, role } = input;
+
+        let whereConditions = [eq(clients.tenantId, ctx.tenantId)];
+
+        if (search) {
+          whereConditions.push(
+            or(
+              ilike(clients.companyName, `%${search}%`),
+              ilike(users.email, `%${search}%`),
+              ilike(users.firstName, `%${search}%`),
+              ilike(users.lastName, `%${search}%`)
+            )!
+          );
+        }
+
+        if (role) {
+          whereConditions.push(eq(users.role, role));
+        }
+
+        const whereClause = and(...whereConditions);
+
+        const [allClients, totalResult] = await Promise.all([
+          db
+            .select({
+              id: clients.id,
+              companyName: clients.companyName,
+              address: clients.address,
+              city: clients.city,
+              state: clients.state,
+              zipCode: clients.zipCode,
+              country: clients.country,
+              phone: clients.phone,
+              status: clients.status,
+              createdAt: clients.createdAt,
+              updatedAt: clients.updatedAt,
+              user: {
+                id: users.id,
+                email: users.email,
+                firstName: users.firstName,
+                lastName: users.lastName,
+                role: users.role,
+                isActive: users.isActive,
+              },
+            })
+            .from(clients)
+            .leftJoin(users, eq(clients.userId, users.id))
+            .where(whereClause)
+            .orderBy(desc(clients.createdAt))
+            .limit(limit)
+            .offset(offset),
+          
+          db
+            .select({ value: count() })
+            .from(clients)
+            .leftJoin(users, eq(clients.userId, users.id))
+            .where(whereClause)
+            .then(res => res[0])
+        ]);
+
+        const total = Number(totalResult.value);
+
+        return {
+          clients: allClients,
+          total,
+          hasMore: offset + limit < total,
+        };
+      } catch (error) {
+        console.error('Error in clients.getAll:', error);
+        throw new TRPCError({
+          code: 'INTERNAL_SERVER_ERROR',
+          message: 'An error occurred while fetching clients',
+          cause: error,
+        });
       }
-
-      const allClients = await db
-        .select({
-          id: clients.id,
-          companyName: clients.companyName,
-          address: clients.address,
-          city: clients.city,
-          state: clients.state,
-          zipCode: clients.zipCode,
-          country: clients.country,
-          phone: clients.phone,
-          status: clients.status,
-          createdAt: clients.createdAt,
-          updatedAt: clients.updatedAt,
-          user: {
-            id: users.id,
-            email: users.email,
-            firstName: users.firstName,
-            lastName: users.lastName,
-            role: users.role,
-            isActive: users.isActive,
-          },
-        })
-        .from(clients)
-        .leftJoin(users, eq(clients.userId, users.id))
-        .where(and(...whereConditions))
-        .orderBy(desc(clients.createdAt))
-        .limit(limit)
-        .offset(offset);
-
-      const [totalResult] = await db
-        .select({ count: count() })
-        .from(clients)
-        .leftJoin(users, eq(clients.userId, users.id))
-        .where(and(...whereConditions));
-
-      return {
-        clients: allClients,
-        total: totalResult.count,
-        hasMore: offset + limit < totalResult.count,
-      };
     }),
 
   getById: tenantProcedure
@@ -168,7 +192,7 @@ export const clientsRouter = router({
       return client;
     }),
 
-  create: adminProcedure
+  create: requirePermission('client.create')
     .input(z.object({
       email: z.string().email(),
       firstName: z.string().optional(),
@@ -232,7 +256,7 @@ export const clientsRouter = router({
       }
     }),
 
-  update: adminProcedure
+  update: requirePermission('client.update')
     .input(z.object({
       id: z.string().uuid(),
       companyName: z.string().optional(),
@@ -310,7 +334,7 @@ export const clientsRouter = router({
       return updatedClient;
     }),
 
-  delete: adminProcedure
+  delete: requirePermission('client.delete')
     .input(z.object({
       id: z.string().uuid(),
     }))
@@ -349,7 +373,7 @@ export const clientsRouter = router({
     }),
 
   // Get client statistics
-  getStats: adminProcedure
+  getStats: requirePermission('client.read')
     .query(async ({ ctx }) => {
       const [totalClients] = await db
         .select({ count: count() })

@@ -56,7 +56,7 @@ export function AdminInvoices() {
     enabled: !!user,
   });
 
-  // Extract real data from API response
+  // Extract data from API response
   const invoices = invoicesData?.invoices || [];
   const totalInvoices = invoicesData?.total || 0;
   const hasMore = invoicesData?.hasMore || false;
@@ -362,24 +362,29 @@ export function AdminInvoices() {
                   <tr key={invoice.id} className="hover:bg-gray-50 transition-colors">
                     <td className="py-4 px-6">
                       <div>
-                        <div className="font-medium text-gray-900">{invoice.invoiceNumber}</div>
+                        <div className="font-medium text-gray-900">{invoice.number}</div>
                         <div className="text-sm text-gray-500">
-                          Invoice #{invoice.invoiceNumber?.split('-').pop()}
+                          Invoice #{invoice.number?.split('-').pop()}
                         </div>
                       </div>
                     </td>
                     <td className="py-4 px-6">
                       <div>
                         <div className="font-medium text-gray-900">
-                          {invoice.clientCompanyName || `${invoice.clientUserFirstName || ''} ${invoice.clientUserLastName || ''}`.trim()}
+                          {invoice.client?.name || 'N/A'}
                         </div>
-                        <div className="text-sm text-gray-500">{invoice.clientUserEmail}</div>
+                        <div className="text-sm text-gray-500">{invoice.client?.email}</div>
                       </div>
                     </td>
                     <td className="py-4 px-6">
                       <div className="font-medium text-gray-900">
                         {formatCurrency(parseFloat(invoice.total.toString()))}
                       </div>
+                      {invoice.tax > 0 && (
+                        <div className="text-sm text-gray-500">
+                          (Tax: {formatCurrency(parseFloat(invoice.tax.toString()))})
+                        </div>
+                      )}
                     </td>
                     <td className="py-4 px-6">
                       <div className="flex items-center space-x-2">

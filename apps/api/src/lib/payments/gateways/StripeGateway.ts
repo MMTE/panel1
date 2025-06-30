@@ -13,6 +13,7 @@ import {
   HealthCheckResult,
   PaymentStatus,
 } from '../interfaces/PaymentGateway';
+import { EventService } from '../../events/EventService';
 
 interface StripeConfig extends GatewayConfig {
   secretKey: string;
@@ -64,6 +65,7 @@ export class StripeGateway implements PaymentGateway {
 
   private stripe: Stripe | null = null;
   private config: StripeConfig | null = null;
+  private eventService = EventService.getInstance();
 
   /**
    * Initialize Stripe with configuration
@@ -324,40 +326,75 @@ export class StripeGateway implements PaymentGateway {
    * Handle successful payment intent
    */
   private async handlePaymentIntentSucceeded(paymentIntent: Stripe.PaymentIntent): Promise<WebhookResult> {
-    return {
-      processed: true,
-      message: 'Payment succeeded',
-      paymentId: paymentIntent.id,
-      status: 'succeeded',
-      data: {
-        amount: paymentIntent.amount / 100,
-        currency: paymentIntent.currency.toUpperCase(),
-        chargeId: paymentIntent.latest_charge as string,
-        receiptUrl: undefined, // Available via expanded charges
-        metadata: paymentIntent.metadata,
-      },
-    };
+    try {
+      // Emit payment.succeeded event
+      if (paymentIntent.metadata.invoiceId && paymentIntent.metadata.tenantId) {
+        await this.eventService.emit('payment.succeeded', {
+          paymentId: paymentIntent.id,
+          invoiceId: paymentIntent.metadata.invoiceId,
+          tenantId: paymentIntent.metadata.tenantId,
+          amount: paymentIntent.amount / 100,
+          currency: paymentIntent.currency.toUpperCase(),
+          gatewayPaymentId: paymentIntent.id,
+          metadata: paymentIntent.metadata,
+        });
+      }
+
+      return {
+        processed: true,
+        message: 'Payment succeeded',
+        paymentId: paymentIntent.id,
+        status: 'succeeded',
+        data: {
+          amount: paymentIntent.amount / 100,
+          currency: paymentIntent.currency.toUpperCase(),
+          chargeId: paymentIntent.latest_charge as string,
+          receiptUrl: undefined, // Available via expanded charges
+          metadata: paymentIntent.metadata,
+        },
+      };
+    } catch (error) {
+      console.error('Error handling payment intent succeeded:', error);
+      throw error;
+    }
   }
 
   /**
    * Handle failed payment intent
    */
   private async handlePaymentIntentFailed(paymentIntent: Stripe.PaymentIntent): Promise<WebhookResult> {
-    const lastError = paymentIntent.last_payment_error;
-    
-    return {
-      processed: true,
-      message: 'Payment failed',
-      paymentId: paymentIntent.id,
-      status: 'failed',
-      data: {
-        amount: paymentIntent.amount / 100,
-        currency: paymentIntent.currency.toUpperCase(),
-        errorCode: lastError?.code,
-        errorMessage: lastError?.message,
-        metadata: paymentIntent.metadata,
-      },
-    };
+    try {
+      const lastError = paymentIntent.last_payment_error;
+      
+      // Emit payment.failed event
+      if (paymentIntent.metadata.invoiceId && paymentIntent.metadata.tenantId) {
+        await this.eventService.emit('payment.failed', {
+          paymentId: paymentIntent.id,
+          invoiceId: paymentIntent.metadata.invoiceId,
+          tenantId: paymentIntent.metadata.tenantId,
+          errorCode: lastError?.code,
+          errorMessage: lastError?.message,
+          metadata: paymentIntent.metadata,
+        });
+      }
+      
+      return {
+        processed: true,
+        message: 'Payment failed',
+        paymentId: paymentIntent.id,
+        status: 'failed',
+        data: {
+          amount: paymentIntent.amount / 100,
+          currency: paymentIntent.currency.toUpperCase(),
+          errorCode: lastError?.code,
+          errorMessage: lastError?.message,
+          metadata: paymentIntent.metadata,
+        },
+      };
+    } catch (error) {
+      console.error('Error handling payment intent failed:', error);
+      throw error;
+    }
   }
 
   /**

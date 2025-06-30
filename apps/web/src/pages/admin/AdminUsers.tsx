@@ -18,6 +18,7 @@ import {
 import { PluginSlot } from '../../lib/plugins';
 import { useAuth } from '../../hooks/useAuth';
 import { trpc } from '../../api/trpc';
+import { Can, usePermissions } from '../../hooks/usePermissions';
 
 export function AdminUsers() {
   const { user } = useAuth();
@@ -158,6 +159,7 @@ export function AdminUsers() {
             <span>Refresh</span>
           </button>
           
+          <Can permission="user.create">
           <button 
             onClick={handleAddUser}
             className="bg-gradient-to-r from-purple-500 to-pink-500 text-white px-4 py-2 rounded-lg hover:from-purple-600 hover:to-pink-600 transition-all duration-200 flex items-center space-x-2"
@@ -165,6 +167,7 @@ export function AdminUsers() {
             <Plus className="w-4 h-4" />
             <span>Add User</span>
           </button>
+          </Can>
         </div>
       </div>
 

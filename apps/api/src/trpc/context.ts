@@ -1,11 +1,13 @@
 import type { CreateExpressContextOptions } from '@trpc/server/adapters/express';
 import { getSessionByToken, type AuthUser } from '../lib/auth.js';
 import { db } from '../db/index';
+import { permissionManager } from '../lib/auth/PermissionManager';
 
 export interface Context {
   db: typeof db;
   user: AuthUser | null;
   tenantId: string | null;
+  input?: unknown;
 }
 
 export async function createContext({
@@ -24,7 +26,7 @@ export async function createContext({
         email: sessionData.users.email,
         firstName: sessionData.users.firstName,
         lastName: sessionData.users.lastName,
-        role: sessionData.users.role as 'ADMIN' | 'CLIENT' | 'RESELLER',
+        role: sessionData.users.role,
         tenantId: sessionData.users.tenantId,
       };
       tenantId = sessionData.users.tenantId;

@@ -15,55 +15,79 @@ export const usersRouter = router({
       isActive: z.boolean().optional(),
     }))
     .query(async ({ input, ctx }) => {
-      const { limit, offset, search, role, isActive } = input;
-
-      const whereConditions = [eq(users.tenantId, ctx.tenantId!)];
-
-      if (search) {
-        whereConditions.push(
-          or(
-            ilike(users.email, `%${search}%`),
-            ilike(users.firstName, `%${search}%`),
-            ilike(users.lastName, `%${search}%`)
-          )!
-        );
+      // Ensure tenant context
+      if (!ctx.tenantId) {
+        throw new TRPCError({
+          code: 'FORBIDDEN',
+          message: 'Tenant context is required',
+        });
       }
 
-      if (role) {
-        whereConditions.push(eq(users.role, role));
+      try {
+        const { limit, offset, search, role, isActive } = input;
+
+        const whereConditions = [eq(users.tenantId, ctx.tenantId)];
+
+        if (search) {
+          whereConditions.push(
+            or(
+              ilike(users.email, `%${search}%`),
+              ilike(users.firstName, `%${search}%`),
+              ilike(users.lastName, `%${search}%`)
+            )!
+          );
+        }
+
+        if (role) {
+          whereConditions.push(eq(users.role, role));
+        }
+
+        if (isActive !== undefined) {
+          whereConditions.push(eq(users.isActive, isActive));
+        }
+
+        const whereClause = and(...whereConditions);
+
+        const [allUsers, totalResult] = await Promise.all([
+          db
+            .select({
+              id: users.id,
+              email: users.email,
+              firstName: users.firstName,
+              lastName: users.lastName,
+              role: users.role,
+              isActive: users.isActive,
+              createdAt: users.createdAt,
+              updatedAt: users.updatedAt,
+            })
+            .from(users)
+            .where(whereClause)
+            .orderBy(desc(users.createdAt))
+            .limit(limit)
+            .offset(offset),
+
+          db
+            .select({ value: count() })
+            .from(users)
+            .where(whereClause)
+            .then(res => res[0])
+        ]);
+
+        const total = Number(totalResult.value);
+
+        return {
+          users: allUsers,
+          total,
+          hasMore: offset + limit < total,
+        };
+      } catch (error) {
+        console.error('Error in users.getAll:', error);
+        throw new TRPCError({
+          code: 'INTERNAL_SERVER_ERROR',
+          message: 'An error occurred while fetching users',
+          cause: error,
+        });
       }
-
-      if (isActive !== undefined) {
-        whereConditions.push(eq(users.isActive, isActive));
-      }
-
-      const allUsers = await db
-        .select({
-          id: users.id,
-          email: users.email,
-          firstName: users.firstName,
-          lastName: users.lastName,
-          role: users.role,
-          isActive: users.isActive,
-          createdAt: users.createdAt,
-          updatedAt: users.updatedAt,
-        })
-        .from(users)
-        .where(and(...whereConditions))
-        .orderBy(desc(users.createdAt))
-        .limit(limit)
-        .offset(offset);
-
-      const [totalResult] = await db
-        .select({ count: count() })
-        .from(users)
-        .where(and(...whereConditions));
-
-      return {
-        users: allUsers,
-        total: totalResult.count,
-        hasMore: offset + limit < totalResult.count,
-      };
     }),
 
   getById: tenantProcedure

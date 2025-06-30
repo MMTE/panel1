@@ -1,8 +1,9 @@
 import Queue from 'bull';
 import { db } from '../../../db';
-import { subscriptions, invoices, payments } from '../../../db/schema';
+import { subscriptions, invoices, payments, plans, clients, tenants } from '../../../db/schema';
 import { eq, and } from 'drizzle-orm';
 import { JobData } from '../JobScheduler';
+import { TaxCalculationService } from '../../invoice/TaxCalculationService';
 
 export class SubscriptionRenewalProcessor {
   static async process(job: Queue.Job<JobData>): Promise<void> {
@@ -19,13 +20,13 @@ export class SubscriptionRenewalProcessor {
         throw new Error('Subscription not found');
       }
 
-      if (subscription.status !== 'ACTIVE') {
+      if (subscription.subscription.status !== 'ACTIVE') {
         console.log(`⚠️ Subscription ${subscriptionId} is not active, skipping renewal`);
         return;
       }
 
       // Check if already renewed (avoid duplicate processing)
-      const currentPeriodEnd = new Date(subscription.currentPeriodEnd);
+      const currentPeriodEnd = new Date(subscription.subscription.currentPeriodEnd);
       const now = new Date();
       
       if (currentPeriodEnd > now) {
@@ -61,15 +62,14 @@ export class SubscriptionRenewalProcessor {
     const result = await db
       .select({
         subscription: subscriptions,
-        plan: {
-          id: subscriptions.planId,
-          name: subscriptions.planId, // We'll need to join with plans table
-          price: subscriptions.unitPrice,
-          currency: subscriptions.metadata,
-          interval: subscriptions.metadata,
-        }
+        plan: plans,
+        client: clients,
+        tenant: tenants
       })
       .from(subscriptions)
+      .leftJoin(plans, eq(subscriptions.planId, plans.id))
+      .leftJoin(clients, eq(subscriptions.clientId, clients.id))
+      .leftJoin(tenants, eq(subscriptions.tenantId, tenants.id))
       .where(
         and(
           eq(subscriptions.id, subscriptionId),
@@ -88,9 +88,16 @@ export class SubscriptionRenewalProcessor {
     const invoiceNumber = await InvoiceNumberService.generateInvoiceNumber(subscription.subscription.tenantId);
     
     // Calculate amounts
-    const subtotal = parseFloat(subscription.subscription.unitPrice || '0');
-    const taxAmount = 0; // TODO: Implement tax calculation
-    const total = subtotal + taxAmount;
+    const subtotal = parseFloat(subscription.subscription.unitPrice || subscription.plan.price);
+    
+    // Calculate tax using TaxCalculationService
+    const taxResult = await TaxCalculationService.calculateTax(subtotal, subscription.subscription.tenantId, {
+      isB2B: subscription.client.metadata?.businessType === 'B2B',
+      countryCode: subscription.client.metadata?.countryCode,
+      stateCode: subscription.client.metadata?.stateCode
+    });
+
+    const total = subtotal + taxResult.amount;
 
     // Create invoice
     const [invoice] = await db
@@ -101,12 +108,19 @@ export class SubscriptionRenewalProcessor {
         invoiceNumber,
         status: 'PENDING',
         subtotal: subtotal.toString(),
-        tax: taxAmount.toString(),
+        tax: taxResult.amount.toString(),
         total: total.toString(),
-        currency: 'USD', // TODO: Get from plan
+        currency: subscription.plan.currency || subscription.tenant.metadata?.defaultCurrency || 'USD',
         dueDate: new Date(), // Immediate payment for renewals
         invoiceType: 'recurring',
         tenantId: subscription.subscription.tenantId,
+        metadata: {
+          taxDetails: {
+            rate: taxResult.rate,
+            type: taxResult.type,
+            description: taxResult.description
+          }
+        }
       })
       .returning();
 
@@ -123,7 +137,7 @@ export class SubscriptionRenewalProcessor {
           amount: invoice.total,
           currency: invoice.currency,
           status: 'PENDING',
-          gateway: 'stripe', // TODO: Get from tenant settings
+          gateway: subscription.tenant.metadata?.defaultPaymentGateway || 'stripe',
           tenantId: subscription.subscription.tenantId,
         })
         .returning();
@@ -235,10 +249,30 @@ export class SubscriptionRenewalProcessor {
     const nextPeriodEnd = new Date(currentPeriodEnd);
     const nextBillingDate = new Date(currentPeriodEnd);
     
-    // TODO: Get interval from plan (monthly, yearly, etc.)
-    // For now, assume monthly
-    nextPeriodEnd.setMonth(nextPeriodEnd.getMonth() + 1);
-    nextBillingDate.setMonth(nextBillingDate.getMonth() + 1);
+    // Use plan interval for calculations
+    const interval = subscription.plan.interval || 'MONTHLY';
+    const intervalCount = subscription.plan.intervalCount || 1;
+
+    switch (interval.toUpperCase()) {
+      case 'DAILY':
+        nextPeriodEnd.setDate(nextPeriodEnd.getDate() + intervalCount);
+        nextBillingDate.setDate(nextBillingDate.getDate() + intervalCount);
+        break;
+      case 'WEEKLY':
+        nextPeriodEnd.setDate(nextPeriodEnd.getDate() + (7 * intervalCount));
+        nextBillingDate.setDate(nextBillingDate.getDate() + (7 * intervalCount));
+        break;
+      case 'MONTHLY':
+        nextPeriodEnd.setMonth(nextPeriodEnd.getMonth() + intervalCount);
+        nextBillingDate.setMonth(nextBillingDate.getMonth() + intervalCount);
+        break;
+      case 'YEARLY':
+        nextPeriodEnd.setFullYear(nextPeriodEnd.getFullYear() + intervalCount);
+        nextBillingDate.setFullYear(nextBillingDate.getFullYear() + intervalCount);
+        break;
+      default:
+        throw new Error(`Unsupported billing interval: ${interval}`);
+    }
 
     // Update subscription
     await db

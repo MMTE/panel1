@@ -44,6 +44,18 @@ export function AdminAnalytics() {
     enabled: !!user,
   });
 
+  const { data: recentActivityData, isLoading: activityLoading } = trpc.analytics.getRecentActivity.useQuery({
+    period: selectedPeriod,
+  }, {
+    enabled: !!user,
+  });
+
+  const { data: segmentsData, isLoading: segmentsLoading } = trpc.analytics.getCustomerSegments.useQuery({
+    period: selectedPeriod,
+  }, {
+    enabled: !!user,
+  });
+
   // Fallback data for loading states
   const overview = analyticsData?.overview || {
     revenue: { current: 0, previous: 0, change: 0, trend: 'up' },
@@ -229,30 +241,36 @@ export function AdminAnalytics() {
         <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
           <h3 className="text-lg font-semibold text-gray-900 mb-6">Recent Activity</h3>
           <div className="space-y-4">
-            {analyticsData?.recentActivity.map((activity, index) => {
-              const ActivityIcon = getActivityIcon(activity.type);
-              const colorClass = getActivityColor(activity.type);
-              
-              return (
-                <div key={index} className="flex items-start space-x-3">
-                  <div className={`w-8 h-8 rounded-full bg-gray-100 flex items-center justify-center ${colorClass}`}>
-                    <ActivityIcon className="w-4 h-4" />
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm text-gray-900">{activity.description}</p>
-                    <p className="text-sm text-gray-500">{activity.customer}</p>
-                    <div className="flex items-center justify-between mt-1">
-                      <span className={`text-sm font-medium ${
-                        activity.amount > 0 ? 'text-green-600' : 'text-red-600'
-                      }`}>
-                        {formatCurrency(Math.abs(activity.amount))}
-                      </span>
-                      <span className="text-xs text-gray-400">{activity.time}</span>
+            {activityLoading ? (
+              <div className="text-gray-500 text-sm">Loading activity data...</div>
+            ) : recentActivityData?.recentActivity?.length ? (
+              recentActivityData.recentActivity.map((activity, index) => {
+                const ActivityIcon = getActivityIcon(activity.type);
+                const colorClass = getActivityColor(activity.type);
+                
+                return (
+                  <div key={index} className="flex items-start space-x-3">
+                    <div className={`w-8 h-8 rounded-full bg-gray-100 flex items-center justify-center ${colorClass}`}>
+                      <ActivityIcon className="w-4 h-4" />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm text-gray-900">{activity.description}</p>
+                      <p className="text-sm text-gray-500">{activity.customer}</p>
+                      <div className="flex items-center justify-between mt-1">
+                        <span className={`text-sm font-medium ${
+                          activity.amount > 0 ? 'text-green-600' : 'text-red-600'
+                        }`}>
+                          {formatCurrency(Math.abs(activity.amount))}
+                        </span>
+                        <span className="text-xs text-gray-400">{new Date(activity.time).toLocaleString()}</span>
+                      </div>
                     </div>
                   </div>
-                </div>
-              );
-            })}
+                );
+              })
+            ) : (
+              <div className="text-gray-500 text-sm">No recent activity to display</div>
+            )}
           </div>
         </div>
       </div>
@@ -270,23 +288,29 @@ export function AdminAnalytics() {
         <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
           <h3 className="text-lg font-semibold text-gray-900 mb-6">Top Performing Plans</h3>
           <div className="space-y-4">
-            {topPlans.map((plan, index) => (
-              <div key={index} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
-                <div className="flex items-center space-x-3">
-                  <div className="w-8 h-8 bg-gradient-to-r from-purple-500 to-pink-500 rounded-lg flex items-center justify-center text-white text-sm font-bold">
-                    {index + 1}
+            {plansLoading ? (
+              <div className="text-gray-500 text-sm">Loading plans data...</div>
+            ) : plansData?.plans?.length ? (
+              plansData.plans.map((plan, index) => (
+                <div key={index} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
+                  <div className="flex items-center space-x-3">
+                    <div className="w-8 h-8 bg-gradient-to-r from-purple-500 to-pink-500 rounded-lg flex items-center justify-center text-white text-sm font-bold">
+                      {index + 1}
+                    </div>
+                    <div>
+                      <p className="font-medium text-gray-900">{plan.name}</p>
+                      <p className="text-sm text-gray-500">{plan.subscribers} subscribers</p>
+                    </div>
                   </div>
-                  <div>
-                    <p className="font-medium text-gray-900">{plan.name}</p>
-                    <p className="text-sm text-gray-500">{plan.subscribers} subscribers</p>
+                  <div className="text-right">
+                    <p className="font-medium text-gray-900">{formatCurrency(plan.revenue)}</p>
+                    <p className="text-sm text-green-600">{formatPercentage(plan.growth || 0)}</p>
                   </div>
                 </div>
-                <div className="text-right">
-                  <p className="font-medium text-gray-900">{formatCurrency(plan.revenue)}</p>
-                  <p className="text-sm text-green-600">{formatPercentage(plan.growth)}</p>
-                </div>
-              </div>
-            ))}
+              ))
+            ) : (
+              <div className="text-gray-500 text-sm">No plans data available</div>
+            )}
           </div>
         </div>
 
@@ -294,24 +318,30 @@ export function AdminAnalytics() {
         <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
           <h3 className="text-lg font-semibold text-gray-900 mb-6">Customer Segments</h3>
           <div className="space-y-4">
-            {analyticsData?.customerSegments.map((segment, index) => (
-              <div key={index} className="space-y-2">
-                <div className="flex items-center justify-between">
-                  <span className="text-sm font-medium text-gray-900">{segment.segment}</span>
-                  <span className="text-sm text-gray-500">{segment.percentage}%</span>
+            {segmentsLoading ? (
+              <div className="text-gray-500 text-sm">Loading segments data...</div>
+            ) : segmentsData?.customerSegments?.length ? (
+              segmentsData.customerSegments.map((segment, index) => (
+                <div key={index} className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm font-medium text-gray-900">{segment.segment}</span>
+                    <span className="text-sm text-gray-500">{segment.percentage}%</span>
+                  </div>
+                  <div className="w-full bg-gray-200 rounded-full h-2">
+                    <div 
+                      className="bg-gradient-to-r from-purple-500 to-pink-500 h-2 rounded-full transition-all duration-300"
+                      style={{ width: `${segment.percentage}%` }}
+                    ></div>
+                  </div>
+                  <div className="flex items-center justify-between text-xs text-gray-500">
+                    <span>{segment.count} customers</span>
+                    <span>{formatCurrency(segment.revenue)}</span>
+                  </div>
                 </div>
-                <div className="w-full bg-gray-200 rounded-full h-2">
-                  <div 
-                    className="bg-gradient-to-r from-purple-500 to-pink-500 h-2 rounded-full transition-all duration-300"
-                    style={{ width: `${segment.percentage}%` }}
-                  ></div>
-                </div>
-                <div className="flex items-center justify-between text-xs text-gray-500">
-                  <span>{segment.count} customers</span>
-                  <span>{formatCurrency(segment.revenue)}</span>
-                </div>
-              </div>
-            ))}
+              ))
+            ) : (
+              <div className="text-gray-500 text-sm">No customer segments data available</div>
+            )}
           </div>
         </div>
       </div>

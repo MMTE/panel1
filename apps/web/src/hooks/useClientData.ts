@@ -5,6 +5,44 @@ import { useState, useEffect } from 'react';
 import { trpc } from '../api/trpc';
 import { useAuth } from './useAuth';
 
+export interface ComponentDefinition {
+  id: string;
+  name: string;
+  description: string;
+  type: string;
+  provider: string;
+  features: Record<string, any>;
+  options: {
+    controlPanelUrl?: string;
+    [key: string]: any;
+  };
+}
+
+export interface SubscribedComponent {
+  id: string;
+  name: string;
+  description: string;
+  quantity: number;
+  unitPrice: string;
+  provisioningStatus: string;
+  componentId: string;
+  definition: ComponentDefinition;
+}
+
+export interface ClientSubscription {
+  id: string;
+  status: string;
+  planId: string;
+  planName: string;
+  currency: string;
+  currentPeriodStart: string;
+  currentPeriodEnd: string;
+  nextBillingDate: string;
+  cancelAtPeriodEnd: boolean;
+  createdAt: string;
+  subscribedComponents: SubscribedComponent[];
+}
+
 export function useClientData() {
   const { user } = useAuth();
   const isClient = user?.role === 'CLIENT';

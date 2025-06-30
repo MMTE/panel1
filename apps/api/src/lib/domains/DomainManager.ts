@@ -13,7 +13,7 @@ import {
   NewDnsRecord,
   NewDomainOperation
 } from '../../db/schema';
-import { eq, and, desc } from 'drizzle-orm';
+import { eq, and, desc, sql } from 'drizzle-orm';
 import { JobScheduler } from '../jobs/JobScheduler';
 
 interface DomainContact {
@@ -218,6 +218,36 @@ export class DomainManager extends EventEmitter {
       this.emit('domain.renewal.started', { domainName: domain.domainName, years });
     } catch (error) {
       console.error('❌ Failed to renew domain:', error);
+      throw error;
+    }
+  }
+
+  async disableAutoRenew(domainId: string): Promise<void> {
+    try {
+      const domain = await this.getDomainById(domainId);
+      if (!domain) {
+        throw new Error('Domain not found');
+      }
+
+      console.log(`🚫 Disabling auto-renew for domain: ${domain.domainName}`);
+
+      await db
+        .update(domains)
+        .set({ autoRenew: false })
+        .where(eq(domains.id, domainId));
+
+      await db
+        .insert(domainOperations)
+        .values({
+          domainId: domain.id,
+          operation: 'disable_auto_renew',
+          status: 'completed',
+          tenantId: domain.tenantId,
+        });
+
+      this.emit('domain.auto_renew.disabled', { domainName: domain.domainName });
+    } catch (error) {
+      console.error(`❌ Failed to disable auto-renew for domain ${domainId}:`, error);
       throw error;
     }
   }
@@ -439,5 +469,150 @@ export class DomainManager extends EventEmitter {
   async shutdown(): Promise<void> {
     console.log('🛑 Shutting down Domain Manager...');
     this.removeAllListeners();
+  }
+
+  async suspendDomain(domainId: string): Promise<void> {
+    try {
+      const domain = await this.getDomainById(domainId);
+      if (!domain) {
+        throw new Error('Domain not found');
+      }
+
+      // Create domain operation record
+      const [operation] = await db
+        .insert(domainOperations)
+        .values({
+          domainId,
+          operation: 'suspend',
+          status: 'pending',
+          requestData: { reason: 'Administrative suspension' },
+          tenantId: domain.tenantId,
+        })
+        .returning();
+
+      // Update domain status
+      await db
+        .update(domains)
+        .set({ 
+          status: 'suspended',
+          updatedAt: new Date()
+        })
+        .where(eq(domains.id, domainId));
+
+      // Suspend DNS service
+      const zones = await this.getDnsZonesByDomain(domainId);
+      for (const zone of zones) {
+        // Backup existing records
+        const records = await this.getDnsRecordsByZone(zone.id);
+        await db
+          .update(dnsZones)
+          .set({ 
+            backupRecords: records,
+            status: 'suspended',
+            updatedAt: new Date()
+          })
+          .where(eq(dnsZones.id, zone.id));
+
+        // Remove all DNS records except essential ones (NS, SOA)
+        await db
+          .delete(dnsRecords)
+          .where(
+            and(
+              eq(dnsRecords.zoneId, zone.id),
+              sql`type NOT IN ('NS', 'SOA')`
+            )
+          );
+      }
+
+      // Update operation status
+      await db
+        .update(domainOperations)
+        .set({ 
+          status: 'completed',
+          completedAt: new Date()
+        })
+        .where(eq(domainOperations.id, operation.id));
+
+      this.emit('domain.suspended', { domainId, domain });
+    } catch (error) {
+      console.error('Failed to suspend domain:', error);
+      throw error;
+    }
+  }
+
+  async unsuspendDomain(domainId: string): Promise<void> {
+    try {
+      const domain = await this.getDomainById(domainId);
+      if (!domain) {
+        throw new Error('Domain not found');
+      }
+
+      if (domain.status !== 'suspended') {
+        throw new Error('Domain is not suspended');
+      }
+
+      // Create domain operation record
+      const [operation] = await db
+        .insert(domainOperations)
+        .values({
+          domainId,
+          operation: 'unsuspend',
+          status: 'pending',
+          requestData: { reason: 'Administrative unsuspension' },
+          tenantId: domain.tenantId,
+        })
+        .returning();
+
+      // Update domain status
+      await db
+        .update(domains)
+        .set({ 
+          status: 'active',
+          updatedAt: new Date()
+        })
+        .where(eq(domains.id, domainId));
+
+      // Restore DNS service
+      const zones = await this.getDnsZonesByDomain(domainId);
+      for (const zone of zones) {
+        if (zone.backupRecords) {
+          // Restore backed up records
+          for (const record of zone.backupRecords) {
+            await db
+              .insert(dnsRecords)
+              .values({
+                ...record,
+                id: undefined, // Generate new ID
+                createdAt: new Date(),
+                updatedAt: new Date()
+              });
+          }
+
+          // Clear backup and update status
+          await db
+            .update(dnsZones)
+            .set({ 
+              backupRecords: null,
+              status: 'active',
+              updatedAt: new Date()
+            })
+            .where(eq(dnsZones.id, zone.id));
+        }
+      }
+
+      // Update operation status
+      await db
+        .update(domainOperations)
+        .set({ 
+          status: 'completed',
+          completedAt: new Date()
+        })
+        .where(eq(domainOperations.id, operation.id));
+
+      this.emit('domain.unsuspended', { domainId, domain });
+    } catch (error) {
+      console.error('Failed to unsuspend domain:', error);
+      throw error;
+    }
   }
 } 

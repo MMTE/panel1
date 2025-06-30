@@ -93,3 +93,15 @@ Thumbs.db
 
 # Prisma
 apps/api/prisma/migrations/
+
+# Turborepo cache
+.turbo/
+
+# Redis dump
+ dump.rdb
+
+# Bolt editor metadata
+.bolt/
+
+# Vite timestamp files
+*.timestamp-*.mjs

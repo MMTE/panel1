@@ -1,609 +1,316 @@
 # Panel1 Plugin Development Guide
 
-Welcome to the **Panel1 Plugin Development Guide**. This comprehensive guide covers everything you need to create, configure, register, test, and publish plugins for Panel1, our open-source billing and provisioning platform. With plugins, you can extend core functionality, integrate third-party services, and customize the user experience—all without touching the core codebase.
+## Overview
 
----
+Panel1's plugin system allows developers to extend the platform's functionality through a standardized SDK and development workflow.
 
-## Table of Contents
+## Plugin Architecture
 
-1. [Prerequisites](#prerequisites)
-2. [Core Concepts](#core-concepts)
-3. [Plugin Manifest (`plugin.json`)](#plugin-manifest-pluginjson)
-4. [Directory Structure & Boilerplate](#directory-structure--boilerplate)
-5. [Building Your First Plugin](#building-your-first-plugin)
-   * Lifecycle Methods
-   * Event Hooks
-   * Custom API Routes
-   * UI Slot Injection
-6. [Configuration & Persistence](#configuration--persistence)
-7. [Asset Hosting](#asset-hosting)
-8. [CLI Tooling & Scaffold](#cli-tooling--scaffold)
-9. [Testing Plugins](#testing-plugins)
-10. [Publishing & Distribution](#publishing--distribution)
-11. [Best Practices & Advanced Patterns](#best-practices--advanced-patterns)
+### 1. Core Concepts
+- Runtime plugin loading
+- Standardized interfaces
+- Event-driven architecture
+- UI slot injection
 
----
+### 2. Plugin Types
+- Service plugins (provisioning, domain, SSL)
+- UI plugins (admin, client portals)
+- Integration plugins (external services)
+- Automation plugins (workflows)
 
-## Prerequisites
+## Development Setup
 
-Before you begin, ensure you have:
-
-* **Node.js ≥ 18** and **npm** or **yarn**
-* A working **Panel1** instance with plugin loading enabled
-* Familiarity with **TypeScript**, **React**, and basic **Zod** schemas
-* **Git** and a code editor (VSCode recommended)
-
-Install the core SDK in your plugin project:
-
+### 1. Prerequisites
 ```bash
-npm install @panel1/plugin-sdk zod
-# or
-yarn add @panel1/plugin-sdk zod
+# Install plugin CLI globally
+npm install -g @panel1/plugin-cli
+
+# Create new plugin
+panel1 plugin create my-plugin
+
+# Build plugin
+cd my-plugin
+npm run build
 ```
 
----
+### 2. Project Structure
+```
+my-plugin/
+├── src/
+│   ├── index.ts        # Plugin entry point
+│   ├── components/     # UI components
+│   ├── services/       # Business logic
+│   └── types/         # Type definitions
+├── plugin.json        # Plugin metadata
+├── package.json       # Dependencies
+└── tsconfig.json     # TypeScript config
+```
 
-## Core Concepts
+## Plugin Configuration
 
-1. **Plugin Manifest**: `plugin.json` declares metadata, compatibility, and dependencies.
-2. **Plugin Entry**: `src/index.ts` exports the plugin object via `createPlugin()`.
-3. **PluginRegistry**: Scans, validates, and manages plugin lifecycle in Panel1.
-4. **Hooks**: Event-driven callbacks for system events (e.g., `invoice.paid`).
-5. **Routes**: Custom backend endpoints under `/plugins/{plugin}/...`.
-6. **UI Slots**: Named injection points in the React frontend.
-7. **Settings Store**: JSON-based persistence for plugin configurations.
-8. **Asset Host**: Serve plugin static files (icons, CSS, etc.) from `/plugins/{plugin}/assets`.
-
----
-
-## Plugin Manifest (`plugin.json`)
-
-The manifest must be located at the plugin root:
-
+### 1. Plugin Metadata
 ```json
 {
   "name": "my-plugin",
-  "version": "0.1.0",
-  "description": "An example plugin for Panel1",
-  "author": "Your Name <you@example.com>",
-  "panel1": ">=0.2.0 <0.3.0",
-  "dependencies": {
-    "analytics-plugin": "^1.2.0"
-  },
-  "permissions": ["read:users", "write:invoices"],
-  "uiSlots": ["admin.dashboard.widgets"],
-  "apiRoutes": ["GET /status", "POST /webhook"]
+  "version": "1.0.0",
+  "description": "My awesome plugin",
+  "entry": "dist/index.js",
+  "type": "service",
+  "hooks": [
+    "onActivate",
+    "onDeactivate"
+  ],
+  "slots": [
+    "admin.dashboard",
+    "client.overview"
+  ],
+  "permissions": [
+    "read:resources",
+    "write:resources"
+  ]
 }
 ```
 
-* **panel1** supports semver ranges for compatibility checks.
-* **dependencies** ensure correct load order; unresolved dependencies block plugin enable.
-* **permissions** declare what the plugin needs access to.
-* **uiSlots** and **apiRoutes** document what the plugin provides.
-
-Validate at runtime using Zod's `PluginMetadataSchema`.
-
----
-
-## Directory Structure & Boilerplate
-
-```
-my-plugin/
-├── plugin.json
-├── package.json
-├── tsconfig.json
-├── src/
-│   ├── index.ts
-│   ├── hooks.ts        # Optional: split hooks here
-│   ├── routes.ts       # Optional: separate routes file
-│   └── components/     # Optional: custom React components
-│       └── MyWidget.tsx
-├── assets/
-│   ├── icon.svg
-│   └── styles.css
-├── tests/
-│   └── index.test.ts
-└── README.md
+### 2. TypeScript Configuration
+```json
+{
+  "compilerOptions": {
+    "target": "ES2020",
+    "module": "CommonJS",
+    "declaration": true,
+    "outDir": "./dist",
+    "strict": true
+  },
+  "include": ["src"],
+  "exclude": ["node_modules"]
+}
 ```
 
-Scaffold your project:
+## Plugin Development
 
-```bash
-npm install -g @panel1/plugin-cli
-panel1 plugin scaffold my-plugin
-cd my-plugin
-npm install
-```
+### 1. Basic Plugin Structure
+```typescript
+import { BasePlugin, PluginContext } from '@panel1/plugin-sdk';
 
-This creates `plugin.json`, `src/index.ts`, and example files.
-
----
-
-## Building Your First Plugin
-
-In `src/index.ts`:
-
-```ts
-import React from 'react';
-import {
-  createPlugin,
-  definePluginConfig,
-  PluginContext,
-  Plugin
-} from '@panel1/plugin-sdk';
-import { z } from 'zod';
-
-const ConfigSchema = definePluginConfig(
-  z.object({ 
-    apiKey: z.string(), 
-    enabled: z.boolean().default(true) 
-  })
-);
-
-const MyPlugin: Plugin = createPlugin({
-  metadata: {
-    name: 'my-plugin',
-    version: '0.1.0',
-    description: 'An example plugin',
-    author: 'Your Name',
-    panel1: '>=0.2.0',
-    permissions: ['read:users'],
-    uiSlots: ['admin.dashboard.widgets'],
-    apiRoutes: ['GET /status']
-  },
-  configSchema: ConfigSchema,
-
-  // Lifecycle Hooks
-  async onInstall(ctx: PluginContext) {
-    await ctx.createSettings({ apiKey: '', enabled: false });
-    ctx.auditLogger.logPluginAction('install', ctx.pluginId);
-  },
-  async onEnable(ctx) {
-    console.log('MyPlugin enabled');
-    ctx.auditLogger.logPluginAction('enable', ctx.pluginId);
-  },
-  async onDisable(ctx) {
-    console.log('MyPlugin disabled');
-    ctx.auditLogger.logPluginAction('disable', ctx.pluginId);
-  },
-  async onUninstall(ctx) {
-    await ctx.deleteSettings();
-    ctx.auditLogger.logPluginAction('uninstall', ctx.pluginId);
-  },
-
-  // Event Hooks
-  hooks: {
-    'invoice.paid': async ({ invoice, context }) => {
-      // Example: send data to external API
-      const config = await context.getPluginConfig('my-plugin');
-      if (config.enabled && config.apiKey) {
-        await fetch('https://api.example.com/notify', {
-          method: 'POST',
-          headers: { 'Authorization': `Bearer ${config.apiKey}` },
-          body: JSON.stringify({ invoiceId: invoice.id })
-        });
-        
-        // Emit custom event
-        await context.eventEmitter.emit('my-plugin.notification.sent', {
-          invoiceId: invoice.id,
-          timestamp: new Date().toISOString()
-        });
-      }
-    }
-  },
-
-  // Custom API Routes
-  routes: {
-    'GET /status': async (req, res, ctx) => {
-      const settings = await ctx.getPluginConfig('my-plugin');
-      return res.json({ 
-        plugin: 'my-plugin',
-        enabled: settings.enabled,
-        timestamp: new Date().toISOString()
-      });
-    },
-    
-    'POST /webhook': async (req, res, ctx) => {
-      const { event, data } = req.body;
-      
-      // Log the webhook event
-      ctx.auditLogger.logPluginAction('webhook_received', ctx.pluginId, {
-        event,
-        data
-      });
-      
-      return res.json({ success: true });
-    }
-  },
-
-  // UI Slot Injection
-  components: {
-    'admin.dashboard.widgets': () => React.createElement('div', {
-      className: 'bg-white rounded-lg shadow p-6'
-    }, [
-      React.createElement('h3', {
-        key: 'title',
-        className: 'text-lg font-semibold text-gray-900 mb-2'
-      }, 'My Plugin Widget'),
-      React.createElement('p', {
-        key: 'content',
-        className: 'text-gray-600'
-      }, 'This widget is provided by my-plugin.')
-    ])
+export default class MyPlugin extends BasePlugin {
+  async onActivate(context: PluginContext) {
+    // Plugin activation logic
   }
-});
 
-export default MyPlugin;
+  async onDeactivate(context: PluginContext) {
+    // Cleanup logic
+  }
+}
 ```
 
-### Lifecycle Methods
+### 2. Service Integration
+```typescript
+import { ServicePlugin, ServiceContext } from '@panel1/plugin-sdk';
 
-* **onInstall**: Setup defaults, DB migrations, initial configuration
-* **onEnable**: Activate jobs, schedule tasks, register event listeners
-* **onDisable**: Pause jobs, clean caches, unregister listeners
-* **onUninstall**: Remove data, cleanup resources
+export default class MyServicePlugin extends ServicePlugin {
+  async provision(context: ServiceContext) {
+    // Provisioning logic
+  }
 
-### Event Hooks
-
-Map core events to plugin logic. Available hooks include:
-
-- **User Events**: `user.created`, `user.updated`, `user.deleted`, `user.loggedIn`, `user.loggedOut`
-- **Client Events**: `client.created`, `client.updated`, `client.deleted`
-- **Invoice Events**: `invoice.created`, `invoice.paid`, `invoice.overdue`, `invoice.cancelled`
-- **Subscription Events**: `subscription.created`, `subscription.updated`, `subscription.cancelled`, `subscription.upgraded`, `subscription.downgraded`
-- **Payment Events**: `payment.completed`, `payment.failed`, `payment.refunded`
-- **System Events**: `system.startup`, `system.shutdown`
-- **Plugin Events**: `plugin.installed`, `plugin.uninstalled`, `plugin.enabled`, `plugin.disabled`
-- **Webhook Events**: `webhook.delivered`, `webhook.failed`
-- **Audit Events**: `audit.logged`
-
-### Custom Routes
-
-Expose new endpoints; use `ctx` for auth, DB access, and audit logging.
-
-### UI Slots
-
-Inject React components into core UI. Available slots include:
-
-- **Admin Dashboard**: `admin.dashboard.widgets`, `admin.dashboard.quick.actions`
-- **Admin Header**: `admin.header.left`, `admin.header.right`
-- **Admin Navigation**: `admin.nav.sidebar`, `admin.nav.footer`
-- **Admin Pages**: `admin.page.top`, `admin.page.bottom`
-- **User Management**: `admin.page.users.header.actions`, `admin.page.users.list.actions`, `admin.page.users.list.footer`
-
----
-
-## Configuration & Persistence
-
-Persist settings via SDK:
-
-```ts
-// Read config
-const cfg = await ctx.getPluginConfig('my-plugin');
-
-// Update config
-await ctx.setPluginConfig('my-plugin', { ...cfg, apiKey: 'new-key' });
-
-// Create initial settings (usually in onInstall)
-await ctx.createSettings({
-  apiKey: '',
-  enabled: false,
-  webhookUrl: ''
-});
-
-// Delete all settings (usually in onUninstall)
-await ctx.deleteSettings();
+  async deprovision(context: ServiceContext) {
+    // Cleanup logic
+  }
+}
 ```
 
-Internally stores JSON in `plugin_settings` table with automatic audit logging.
+### 3. UI Integration
+```typescript
+import { UIPlugin, UIContext } from '@panel1/plugin-sdk';
+import MyDashboardWidget from './components/MyDashboardWidget';
 
----
-
-## Asset Hosting
-
-Serve assets under `/plugins/{plugin}/assets`:
-
-```ts
-import { getPluginAssetUrl } from '@panel1/plugin-sdk';
-
-const icon = getPluginAssetUrl('my-plugin', 'icon.svg');
-const stylesheet = getPluginAssetUrl('my-plugin', 'styles.css');
+export default class MyUIPlugin extends UIPlugin {
+  slots = {
+    'admin.dashboard': MyDashboardWidget
+  };
+}
 ```
 
-Ensure `assets/` files are copied to the build output.
+## Plugin Features
 
----
+### 1. Hook System
+- Lifecycle hooks (activate, deactivate)
+- Event hooks (onEvent, beforeEvent)
+- Action hooks (beforeAction, afterAction)
+- Filter hooks (filterData)
 
-## CLI Tooling & Scaffold
+### 2. UI Slots
+- Admin dashboard widgets
+- Client portal sections
+- Settings pages
+- Custom pages
 
-Install the CLI globally:
+### 3. Service Integration
+- Provisioning handlers
+- Resource management
+- Status monitoring
+- Configuration UI
 
-```bash
-npm install -g @panel1/plugin-cli
-```
+## Plugin Testing
 
-Commands:
+### 1. Unit Testing
+```typescript
+import { TestContext } from '@panel1/plugin-sdk/testing';
 
-* `panel1 plugin scaffold <name>`: Create new plugin boilerplate
-* `panel1 plugin build`: Compile TypeScript to JS in `dist/`
-* `panel1 plugin build --watch`: Build in watch mode for development
-* `panel1 plugin validate`: Check manifest and schema
-* `panel1 plugin test`: Run plugin tests
-* `panel1 plugin install <source>`: Install plugin from various sources
-* `panel1 plugin publish`: Publish plugin to marketplace
+describe('MyPlugin', () => {
+  let plugin: MyPlugin;
+  let context: TestContext;
 
-### Scaffold Templates
+  beforeEach(() => {
+    context = new TestContext();
+    plugin = new MyPlugin();
+  });
 
-Choose from multiple templates:
-
-- **Basic Plugin**: Simple plugin with lifecycle methods and basic hooks
-- **UI Widget Plugin**: Plugin focused on dashboard widgets and UI components
-- **API Integration Plugin**: Plugin for integrating with external APIs
-- **Billing Hook Plugin**: Plugin for handling billing events and workflows
-
----
-
-## Testing Plugins
-
-### Unit Tests
-
-Use **Vitest** for TypeScript tests with mocked `PluginContext`:
-
-```ts
-import { describe, it, expect, vi } from 'vitest';
-import { createPluginContext } from '@panel1/plugin-sdk';
-import MyPlugin from '../src/index';
-
-describe('MyPlugin hooks', () => {
-  it('should handle invoice.paid', async () => {
-    const mockFetch = vi.fn().mockResolvedValue({ ok: true });
-    global.fetch = mockFetch;
-
-    const ctx = createPluginContext('my-plugin', {
-      getPluginConfig: vi.fn().mockResolvedValue({ 
-        enabled: true, 
-        apiKey: 'test-key' 
-      }),
-      eventEmitter: {
-        emit: vi.fn()
-      }
-    });
-
-    const hook = MyPlugin.hooks?.['invoice.paid'];
-    expect(hook).toBeDefined();
-
-    if (hook) {
-      await hook({
-        invoice: { id: 'inv_123', total: 100 },
-        context: ctx,
-      });
-    }
-
-    expect(mockFetch).toHaveBeenCalledWith(
-      'https://api.example.com/notify',
-      expect.objectContaining({
-        method: 'POST',
-        headers: { 'Authorization': 'Bearer test-key' },
-        body: JSON.stringify({ invoiceId: 'inv_123' })
-      })
-    );
+  it('should activate successfully', async () => {
+    await plugin.onActivate(context);
+    expect(context.isActive).toBe(true);
   });
 });
 ```
 
-### Integration Tests
+### 2. Integration Testing
+```typescript
+import { IntegrationTestContext } from '@panel1/plugin-sdk/testing';
 
-Test plugin installation and UI injection:
+describe('MyPlugin Integration', () => {
+  let context: IntegrationTestContext;
 
-```ts
-import { test, expect } from '@playwright/test';
+  beforeAll(async () => {
+    context = await IntegrationTestContext.create();
+  });
 
-test('plugin installs and shows widget', async ({ page }) => {
-  // Install plugin
-  await page.goto('/admin/plugins');
-  await page.click('[data-testid="install-my-plugin"]');
-  
-  // Check dashboard widget appears
-  await page.goto('/admin');
-  await expect(page.locator('[data-testid="my-plugin-widget"]')).toBeVisible();
+  it('should handle events', async () => {
+    await context.emitEvent('test.event');
+    expect(context.eventHandled).toBe(true);
+  });
 });
 ```
 
-### Running Tests
+## Plugin Deployment
 
+### 1. Building
 ```bash
-# Run all tests
-panel1 plugin test
+# Build plugin
+npm run build
 
-# Run tests in watch mode
-panel1 plugin test --watch
+# Package plugin
+panel1 plugin package
 
-# Run tests with coverage
-panel1 plugin test --coverage
-```
-
----
-
-## Publishing & Distribution
-
-### 1. Prepare for Release
-
-```bash
 # Validate plugin
 panel1 plugin validate
-
-# Run tests
-panel1 plugin test
-
-# Build for production
-panel1 plugin build
 ```
 
-### 2. Publish to Marketplace
-
+### 2. Installation
 ```bash
-# Dry run to see what would be published
-panel1 plugin publish --dry-run
+# Install in development
+panel1 plugin install --dev
 
-# Publish to npm and marketplace
-panel1 plugin publish
+# Install in production
+panel1 plugin install --prod
 ```
 
-### 3. Distribution Methods
+## Best Practices
 
-Users can install via:
+### 1. Development
+- Follow TypeScript best practices
+- Use proper error handling
+- Implement logging
+- Write comprehensive tests
 
-```bash
-# From npm
-panel1 plugin install my-plugin
+### 2. Security
+- Validate inputs
+- Handle sensitive data
+- Follow security guidelines
+- Implement proper error handling
 
-# From GitHub
-panel1 plugin install github:username/my-plugin
+### 3. Performance
+- Optimize resource usage
+- Cache when appropriate
+- Handle cleanup properly
+- Monitor performance
 
-# From URL
-panel1 plugin install https://example.com/my-plugin.zip
+## Plugin Guidelines
 
-# From local path
-panel1 plugin install ./my-plugin
-```
+### 1. Code Quality
+- Use TypeScript
+- Follow coding standards
+- Document code
+- Write tests
 
----
+### 2. User Experience
+- Consistent UI design
+- Proper error messages
+- Loading states
+- Responsive design
 
-## Best Practices & Advanced Patterns
+### 3. Maintenance
+- Version compatibility
+- Update documentation
+- Monitor issues
+- Provide support
 
-### Security
+## Example Plugins
 
-* **Validate Input**: Use Zod schemas for all route inputs
-* **Audit Everything**: Use `ctx.auditLogger` for compliance tracking
-* **Permissions**: Declare required permissions in manifest
-* **Sanitize Output**: Prevent XSS in UI components
+### 1. Service Plugin
+```typescript
+import { ServicePlugin, ServiceContext } from '@panel1/plugin-sdk';
 
-```ts
-// Route input validation
-const InputSchema = z.object({
-  email: z.string().email(),
-  amount: z.number().positive()
-});
+export default class CpanelPlugin extends ServicePlugin {
+  async provision(context: ServiceContext) {
+    const { domain, username } = context.data;
+    // Provision cPanel account
+  }
 
-routes: {
-  'POST /process': async (req, res, ctx) => {
-    const input = InputSchema.parse(req.body);
-    
-    // Log the action
-    ctx.auditLogger.logPluginAction('process_request', ctx.pluginId, input);
-    
-    // Process safely
-    return res.json({ success: true });
+  async getStatus(context: ServiceContext) {
+    // Return service status
   }
 }
 ```
 
-### Performance
+### 2. UI Plugin
+```typescript
+import { UIPlugin } from '@panel1/plugin-sdk';
+import DashboardWidget from './components/DashboardWidget';
 
-* **Avoid Blocking**: Use background jobs for heavy operations
-* **Cache Data**: Store frequently accessed data in plugin settings
-* **Optimize Queries**: Use efficient database queries
-* **Lazy Loading**: Load UI components only when needed
+export default class AnalyticsPlugin extends UIPlugin {
+  slots = {
+    'admin.dashboard': DashboardWidget
+  };
 
-### Error Handling
-
-* **Graceful Degradation**: Handle errors without breaking core functionality
-* **Logging**: Use structured logging for debugging
-* **User Feedback**: Provide clear error messages
-
-```ts
-hooks: {
-  'invoice.paid': async ({ invoice, context }) => {
-    try {
-      await processInvoice(invoice);
-    } catch (error) {
-      context.logger.error('Failed to process invoice:', error);
-      
-      // Don't throw - let other plugins continue
-      context.auditLogger.logPluginAction('error', context.pluginId, {
-        error: error.message,
-        invoiceId: invoice.id
-      });
-    }
+  async getData() {
+    // Fetch analytics data
   }
 }
 ```
 
-### Internationalization
+## Troubleshooting
 
-Use the translation system for user-facing text:
+### 1. Common Issues
+- Plugin loading failures
+- Hook registration issues
+- UI slot conflicts
+- Type errors
 
-```ts
-components: {
-  'admin.dashboard.widgets': () => {
-    const { translate } = usePluginContext();
-    
-    return React.createElement('div', {}, [
-      React.createElement('h3', {}, translate('my-plugin.widget.title')),
-      React.createElement('p', {}, translate('my-plugin.widget.description'))
-    ]);
-  }
-}
-```
+### 2. Debugging
+- Enable debug logging
+- Check plugin logs
+- Validate configuration
+- Test in isolation
 
-### Advanced UI Patterns
+## Resources
 
-* **Conditional Rendering**: Show components based on user permissions
-* **State Management**: Use React hooks for component state
-* **Event Communication**: Use plugin events for component communication
+### 1. Documentation
+- API reference
+- Hook documentation
+- UI slot catalog
+- Example plugins
 
-### Plugin Dependencies
-
-Declare and manage plugin dependencies:
-
-```json
-{
-  "dependencies": {
-    "analytics-plugin": "^1.2.0",
-    "notification-plugin": ">=2.0.0 <3.0.0"
-  }
-}
-```
-
-### Versioning Strategy
-
-* **Semantic Versioning**: Use semver for plugin versions
-* **Breaking Changes**: Increment major version for breaking changes
-* **Migration Scripts**: Provide migration logic for major updates
-
----
-
-## Infrastructure Extension Plan
-
-Panel1's core infrastructure now supports key enterprise capabilities. The plugin system provides:
-
-### 1. Multi‑Tenant Support
-- Plugins automatically inherit tenant isolation
-- `ctx.tenantId` available in plugin context
-- Settings scoped by tenant
-
-### 2. Event-Driven Architecture
-- Comprehensive event system with 20+ event types
-- Webhook dispatch for external integrations
-- Audit logging for compliance
-
-### 3. Advanced Security
-- Permission-based access control
-- Audit trails for all plugin actions
-- Row-level security in database
-
-### 4. Developer Experience
-- Full CLI tooling for development lifecycle
-- Multiple plugin templates
-- Comprehensive testing framework
-- Hot reload during development
-
-### 5. Marketplace Ecosystem
-- Plugin discovery and installation
-- User reviews and ratings
-- Download statistics
-- Verified plugin program
-
----
-
-This plugin system provides a solid foundation for building a vibrant ecosystem around Panel1, enabling developers to extend the platform while maintaining security, performance, and user experience standards.
+### 2. Tools
+- Plugin CLI
+- Development tools
+- Testing utilities
+- Debugging tools

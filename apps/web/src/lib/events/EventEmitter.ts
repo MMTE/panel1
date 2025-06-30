@@ -1,30 +1,36 @@
-// import { supabase } from '../supabase'; // TODO: Replace with tRPC
-import { tenantManager } from '../tenant/TenantManager';
-import type { Panel1EventMap } from '@panel1/plugin-sdk';
+import { trpc } from '../../api/trpc';
 
-export interface EventData {
-  [key: string]: any;
-}
-
-export interface EventOptions {
+export interface EventMetadata {
   entityType?: string;
   entityId?: string;
   userId?: string;
   tenantId?: string;
+  timestamp?: Date;
 }
 
-export interface EventListener {
-  id: string;
-  eventType: string;
-  callback: (data: EventData) => void | Promise<void>;
+export interface Event {
+  type: string;
+  payload: any;
+  metadata: EventMetadata;
 }
 
-export interface WebhookEndpoint {
-  id: string;
+export interface WebhookConfig {
+  id?: string;
   url: string;
   events: string[];
+  isActive: boolean;
   secret?: string;
-  is_active: boolean;
+  metadata?: Record<string, any>;
+}
+
+export interface EventHistoryOptions {
+  startDate?: Date;
+  endDate?: Date;
+  eventTypes?: string[];
+  entityType?: string;
+  entityId?: string;
+  limit?: number;
+  offset?: number;
 }
 
 /**
@@ -32,23 +38,16 @@ export interface WebhookEndpoint {
  * Handles in-memory event emission and webhook delivery
  * TODO: Implement persistent event storage with tRPC + Drizzle
  */
-export class EventEmitter {
+class EventEmitter {
   private static instance: EventEmitter;
-  private listeners: Map<string, EventListener[]> = new Map();
-  private webhooks: WebhookEndpoint[] = [];
+  private trpcClient: typeof trpc;
+  private eventListeners: Map<string, Array<(event: Event) => void>> = new Map();
 
   private constructor() {
-    // Initialize with demo webhook for development
-    this.webhooks = [{
-      id: 'demo-webhook',
-      url: 'https://webhook.site/demo',
-      events: ['*'],
-      secret: 'demo-secret',
-      is_active: false // Disabled by default
-    }];
+    this.trpcClient = trpc;
   }
 
-  static getInstance(): EventEmitter {
+  public static getInstance(): EventEmitter {
     if (!EventEmitter.instance) {
       EventEmitter.instance = new EventEmitter();
     }
@@ -56,266 +55,139 @@ export class EventEmitter {
   }
 
   /**
-   * Subscribe to an event
-   */
-  on(eventType: string, callback: (data: EventData) => void | Promise<void>): string {
-    const listener: EventListener = {
-      id: `listener_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-      eventType,
-      callback
-    };
-
-    if (!this.listeners.has(eventType)) {
-      this.listeners.set(eventType, []);
-    }
-
-    this.listeners.get(eventType)!.push(listener);
-    return listener.id;
-  }
-
-  /**
-   * Unsubscribe from an event
-   */
-  off(listenerId: string): void {
-    for (const [eventType, listeners] of this.listeners.entries()) {
-      const index = listeners.findIndex(l => l.id === listenerId);
-      if (index !== -1) {
-        listeners.splice(index, 1);
-        if (listeners.length === 0) {
-          this.listeners.delete(eventType);
-        }
-        break;
-      }
-    }
-  }
-
-  /**
    * Emit an event
    */
-  async emit(eventType: string, data: EventData, options: EventOptions = {}): Promise<void> {
-    const event = {
-      eventType,
-      data,
-      options,
-      timestamp: new Date().toISOString()
-    };
-
-    // Log the event
-    if (!options.tenantId) {
-      console.warn('📡 Event emitted without tenant context:', event);
-    } else {
-      console.log('📡 Event emitted:', event);
-    }
-
-    // Store event in database
-    await this.storeEvent(event);
-
-    // Trigger local listeners
-    await this.triggerListeners(eventType, data);
-
-    // Send to webhooks
-    await this.sendWebhooks(event);
-  }
-
-  /**
-   * Store event in database
-   * TODO: Implement with tRPC + Drizzle
-   */
-  private async storeEvent(event: any): Promise<void> {
+  public async emit(type: string, payload: any, metadata: EventMetadata = {}): Promise<void> {
     try {
-      // TODO: Replace with tRPC call
-      console.log('TODO: Store event in database via tRPC:', event);
-    } catch (error) {
-      console.error('Error storing event:', error);
-    }
-  }
-
-  /**
-   * Trigger local event listeners
-   */
-  private async triggerListeners(eventType: string, data: EventData): Promise<void> {
-    const listeners = this.listeners.get(eventType) || [];
-    const wildcardListeners = this.listeners.get('*') || [];
-    
-    const allListeners = [...listeners, ...wildcardListeners];
-
-    for (const listener of allListeners) {
-      try {
-        await listener.callback(data);
-      } catch (error) {
-        console.error(`Error in event listener ${listener.id}:`, error);
-      }
-    }
-  }
-
-  /**
-   * Send event to configured webhooks
-   */
-  private async sendWebhooks(event: any): Promise<void> {
-    const activeWebhooks = this.webhooks.filter(w => w.is_active);
-    
-    for (const webhook of activeWebhooks) {
-      if (this.shouldSendToWebhook(webhook, event.eventType)) {
-        try {
-          await this.sendWebhook(webhook, event);
-        } catch (error) {
-          console.error(`Error sending webhook to ${webhook.url}:`, error);
+      // Create event object
+      const event: Event = {
+        type,
+        payload,
+        metadata: {
+          ...metadata,
+          timestamp: new Date()
         }
-      }
-    }
-  }
+      };
 
-  /**
-   * Check if event should be sent to webhook
-   */
-  private shouldSendToWebhook(webhook: WebhookEndpoint, eventType: string): boolean {
-    return webhook.events.includes('*') || webhook.events.includes(eventType);
-  }
-
-  /**
-   * Send individual webhook
-   */
-  private async sendWebhook(webhook: WebhookEndpoint, event: any): Promise<void> {
-    try {
-      const response = await fetch(webhook.url, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'X-Panel1-Signature': webhook.secret ? this.generateSignature(event, webhook.secret) : '',
-          'X-Panel1-Event': event.eventType,
-        },
-        body: JSON.stringify(event)
+      // Store event in backend
+      await this.trpcClient.events.emitEvent.mutate({
+        type: event.type,
+        payload: event.payload,
+        metadata: event.metadata
       });
 
-      if (!response.ok) {
-        throw new Error(`Webhook returned ${response.status}: ${response.statusText}`);
-      }
-
-      console.log(`✅ Webhook sent to ${webhook.url}`);
+      // Notify local listeners
+      const listeners = this.eventListeners.get(type) || [];
+      await Promise.all(listeners.map(listener => listener(event)));
     } catch (error) {
-      console.error(`❌ Webhook failed for ${webhook.url}:`, error);
+      console.error('Failed to emit event:', error);
       throw error;
     }
   }
 
   /**
-   * Generate webhook signature
+   * Subscribe to events
    */
-  private generateSignature(payload: any, secret: string): string {
-    // Simple signature generation - in production, use crypto library
-    return `sha256=${btoa(JSON.stringify(payload) + secret)}`;
+  public on(type: string, callback: (event: Event) => void): () => void {
+    const listeners = this.eventListeners.get(type) || [];
+    listeners.push(callback);
+    this.eventListeners.set(type, listeners);
+
+    // Return unsubscribe function
+    return () => {
+      const listeners = this.eventListeners.get(type) || [];
+      const index = listeners.indexOf(callback);
+      if (index !== -1) {
+        listeners.splice(index, 1);
+        if (listeners.length === 0) {
+          this.eventListeners.delete(type);
+        } else {
+          this.eventListeners.set(type, listeners);
+        }
+      }
+    };
   }
 
   /**
-   * Get webhook endpoints
-   * TODO: Implement with tRPC + Drizzle
+   * Get registered webhooks
    */
-  async getWebhooks(): Promise<WebhookEndpoint[]> {
+  public async getWebhooks(): Promise<WebhookConfig[]> {
     try {
-      // TODO: Replace with tRPC call
-      console.log('TODO: Fetch webhooks from database via tRPC');
-      return this.webhooks;
+      const webhooks = await this.trpcClient.events.getWebhooks.query();
+      return webhooks;
     } catch (error) {
-      console.error('Error fetching webhooks:', error);
-      return [];
+      console.error('Failed to fetch webhooks:', error);
+      throw error;
     }
   }
 
   /**
-   * Create webhook endpoint
-   * TODO: Implement with tRPC + Drizzle
+   * Create a new webhook
    */
-  async createWebhook(webhook: Omit<WebhookEndpoint, 'id'>): Promise<WebhookEndpoint | null> {
+  public async createWebhook(webhook: Omit<WebhookConfig, 'id'>): Promise<WebhookConfig> {
     try {
-      console.log('TODO: Create webhook via tRPC:', webhook);
-      
-      const newWebhook: WebhookEndpoint = {
-        id: `webhook_${Date.now()}`,
-        ...webhook
-      };
-      
-      this.webhooks.push(newWebhook);
+      const newWebhook = await this.trpcClient.events.createWebhook.mutate(webhook);
       return newWebhook;
     } catch (error) {
-      console.error('Error creating webhook:', error);
-      return null;
+      console.error('Failed to create webhook:', error);
+      throw error;
     }
   }
 
   /**
-   * Update webhook endpoint
-   * TODO: Implement with tRPC + Drizzle
+   * Update an existing webhook
    */
-  async updateWebhook(id: string, updates: Partial<WebhookEndpoint>): Promise<WebhookEndpoint | null> {
+  public async updateWebhook(id: string, updates: Partial<WebhookConfig>): Promise<WebhookConfig> {
     try {
-      console.log('TODO: Update webhook via tRPC:', { id, updates });
-      
-      const index = this.webhooks.findIndex(w => w.id === id);
-      if (index !== -1) {
-        this.webhooks[index] = { ...this.webhooks[index], ...updates };
-        return this.webhooks[index];
-      }
-      
-      return null;
+      const updatedWebhook = await this.trpcClient.events.updateWebhook.mutate({
+        id,
+        ...updates
+      });
+      return updatedWebhook;
     } catch (error) {
-      console.error('Error updating webhook:', error);
-      return null;
+      console.error('Failed to update webhook:', error);
+      throw error;
     }
   }
 
   /**
-   * Delete webhook endpoint
-   * TODO: Implement with tRPC + Drizzle
+   * Delete a webhook
    */
-  async deleteWebhook(id: string): Promise<boolean> {
+  public async deleteWebhook(id: string): Promise<void> {
     try {
-      console.log('TODO: Delete webhook via tRPC:', id);
-      
-      const index = this.webhooks.findIndex(w => w.id === id);
-      if (index !== -1) {
-        this.webhooks.splice(index, 1);
-        return true;
-      }
-      
-      return false;
+      await this.trpcClient.events.deleteWebhook.mutate({ id });
     } catch (error) {
-      console.error('Error deleting webhook:', error);
-      return false;
+      console.error('Failed to delete webhook:', error);
+      throw error;
     }
   }
 
   /**
    * Get event history
-   * TODO: Implement with tRPC + Drizzle
    */
-  async getEventHistory(options: {
-    eventType?: string;
-    entityType?: string;
-    entityId?: string;
-    limit?: number;
-    offset?: number;
-  } = {}): Promise<any[]> {
+  public async getEventHistory(options: EventHistoryOptions = {}): Promise<Event[]> {
     try {
-      console.log('TODO: Fetch event history from database via tRPC:', options);
-      return [];
+      const result = await this.trpcClient.events.getEventHistory.query({
+        startDate: options.startDate?.toISOString(),
+        endDate: options.endDate?.toISOString(),
+        eventTypes: options.eventTypes,
+        entityType: options.entityType,
+        entityId: options.entityId,
+        limit: options.limit || 50,
+        offset: options.offset || 0
+      });
+
+      return result.events;
     } catch (error) {
-      console.error('Error fetching event history:', error);
-      return [];
+      console.error('Failed to fetch event history:', error);
+      throw error;
     }
   }
 }
 
-// Singleton instance
-const eventEmitter = EventEmitter.getInstance();
+export const eventEmitter = EventEmitter.getInstance();
 
-// Export convenience functions
-export const emitEvent = (eventType: string, data: EventData, options?: EventOptions) => 
-  eventEmitter.emit(eventType, data, options);
-
-export const onEvent = (eventType: string, callback: (data: EventData) => void | Promise<void>) => 
-  eventEmitter.on(eventType, callback);
-
-export const offEvent = (listenerId: string) => 
-  eventEmitter.off(listenerId);
-
-export { eventEmitter };
+// Add a convenience function for emitting events
+export const emitEvent = (type: string, payload: any, metadata: EventMetadata = {}): Promise<void> => {
+  return eventEmitter.emit(type, payload, metadata);
+};

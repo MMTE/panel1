@@ -180,7 +180,7 @@ export function CreateClientModal({ isOpen, onClose, onSuccess }: CreateClientMo
                     name="email"
                     value={formData.email}
                     onChange={handleInputChange}
-                    className={`w-full border rounded-lg pl-10 pr-4 py-2 focus:ring-2 focus:ring-purple-500 focus:border-transparent ${
+                    className={`w-full border rounded-lg pl-10 pr-4 py-2 text-gray-900 focus:ring-2 focus:ring-purple-500 focus:border-transparent ${
                       errors.email ? 'border-red-300' : 'border-gray-300'
                     }`}
                     placeholder="john@example.com"
@@ -203,7 +203,7 @@ export function CreateClientModal({ isOpen, onClose, onSuccess }: CreateClientMo
                     name="companyName"
                     value={formData.companyName}
                     onChange={handleInputChange}
-                    className="w-full border border-gray-300 rounded-lg pl-10 pr-4 py-2 focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+                    className="w-full border border-gray-300 rounded-lg pl-10 pr-4 py-2 text-gray-900 focus:ring-2 focus:ring-purple-500 focus:border-transparent"
                     placeholder="Acme Corporation"
                   />
                 </div>
@@ -218,7 +218,7 @@ export function CreateClientModal({ isOpen, onClose, onSuccess }: CreateClientMo
                   name="firstName"
                   value={formData.firstName}
                   onChange={handleInputChange}
-                  className={`w-full border rounded-lg px-4 py-2 focus:ring-2 focus:ring-purple-500 focus:border-transparent ${
+                  className={`w-full border rounded-lg px-4 py-2 text-gray-900 focus:ring-2 focus:ring-purple-500 focus:border-transparent ${
                     errors.firstName ? 'border-red-300' : 'border-gray-300'
                   }`}
                   placeholder="John"
@@ -238,7 +238,7 @@ export function CreateClientModal({ isOpen, onClose, onSuccess }: CreateClientMo
                   name="lastName"
                   value={formData.lastName}
                   onChange={handleInputChange}
-                  className={`w-full border rounded-lg px-4 py-2 focus:ring-2 focus:ring-purple-500 focus:border-transparent ${
+                  className={`w-full border rounded-lg px-4 py-2 text-gray-900 focus:ring-2 focus:ring-purple-500 focus:border-transparent ${
                     errors.lastName ? 'border-red-300' : 'border-gray-300'
                   }`}
                   placeholder="Doe"
@@ -260,7 +260,7 @@ export function CreateClientModal({ isOpen, onClose, onSuccess }: CreateClientMo
                     name="phone"
                     value={formData.phone}
                     onChange={handleInputChange}
-                    className="w-full border border-gray-300 rounded-lg pl-10 pr-4 py-2 focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+                    className="w-full border border-gray-300 rounded-lg pl-10 pr-4 py-2 text-gray-900 focus:ring-2 focus:ring-purple-500 focus:border-transparent"
                     placeholder="+1 (555) 123-4567"
                   />
                 </div>
@@ -285,7 +285,7 @@ export function CreateClientModal({ isOpen, onClose, onSuccess }: CreateClientMo
                   name="address"
                   value={formData.address}
                   onChange={handleInputChange}
-                  className="w-full border border-gray-300 rounded-lg px-4 py-2 focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+                  className="w-full border border-gray-300 rounded-lg px-4 py-2 text-gray-900 focus:ring-2 focus:ring-purple-500 focus:border-transparent"
                   placeholder="123 Main Street"
                 />
               </div>
@@ -300,7 +300,7 @@ export function CreateClientModal({ isOpen, onClose, onSuccess }: CreateClientMo
                     name="city"
                     value={formData.city}
                     onChange={handleInputChange}
-                    className="w-full border border-gray-300 rounded-lg px-4 py-2 focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+                    className="w-full border border-gray-300 rounded-lg px-4 py-2 text-gray-900 focus:ring-2 focus:ring-purple-500 focus:border-transparent"
                     placeholder="New York"
                   />
                 </div>
@@ -314,7 +314,7 @@ export function CreateClientModal({ isOpen, onClose, onSuccess }: CreateClientMo
                     name="state"
                     value={formData.state}
                     onChange={handleInputChange}
-                    className="w-full border border-gray-300 rounded-lg px-4 py-2 focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+                    className="w-full border border-gray-300 rounded-lg px-4 py-2 text-gray-900 focus:ring-2 focus:ring-purple-500 focus:border-transparent"
                     placeholder="NY"
                   />
                 </div>
@@ -328,7 +328,7 @@ export function CreateClientModal({ isOpen, onClose, onSuccess }: CreateClientMo
                     name="zipCode"
                     value={formData.zipCode}
                     onChange={handleInputChange}
-                    className="w-full border border-gray-300 rounded-lg px-4 py-2 focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+                    className="w-full border border-gray-300 rounded-lg px-4 py-2 text-gray-900 focus:ring-2 focus:ring-purple-500 focus:border-transparent"
                     placeholder="10001"
                   />
                 </div>
@@ -343,7 +343,7 @@ export function CreateClientModal({ isOpen, onClose, onSuccess }: CreateClientMo
                   name="country"
                   value={formData.country}
                   onChange={handleInputChange}
-                  className="w-full border border-gray-300 rounded-lg px-4 py-2 focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+                  className="w-full border border-gray-300 rounded-lg px-4 py-2 text-gray-900 focus:ring-2 focus:ring-purple-500 focus:border-transparent"
                   placeholder="United States"
                 />
               </div>

@@ -8,7 +8,9 @@ import {
   ArrowUpRight,
   ArrowDownRight,
   AlertCircle,
-  CreditCard
+  CreditCard,
+  Settings,
+  Loader
 } from 'lucide-react';
 import { ClientSubscription } from '../../hooks/useClientData';
 
@@ -19,11 +21,12 @@ interface SubscriptionDetailsProps {
 }
 
 export function SubscriptionDetails({ subscription, onClose, onCancel }: SubscriptionDetailsProps) {
-  const formatCurrency = (amount: number) => {
+  const formatCurrency = (amount: number | string) => {
+    const numericAmount = typeof amount === 'string' ? parseFloat(amount) : amount;
     return new Intl.NumberFormat('en-US', {
       style: 'currency',
-      currency: 'USD'
-    }).format(amount);
+      currency: subscription.currency || 'USD'
+    }).format(numericAmount);
   };
 
   const formatDate = (dateString: string) => {
@@ -57,7 +60,40 @@ export function SubscriptionDetails({ subscription, onClose, onCancel }: Subscri
     return diffDays;
   };
 
+  const getProvisioningStatusColor = (status: string) => {
+    switch (status?.toLowerCase()) {
+      case 'active':
+        return 'bg-green-100 text-green-800';
+      case 'pending':
+        return 'bg-yellow-100 text-yellow-800';
+      case 'failed':
+        return 'bg-red-100 text-red-800';
+      default:
+        return 'bg-gray-100 text-gray-800';
+    }
+  };
+
+  const getProvisioningStatusIcon = (status: string) => {
+    switch (status?.toLowerCase()) {
+      case 'active':
+        return <CheckCircle className="w-4 h-4 text-green-500" />;
+      case 'pending':
+        return <Loader className="w-4 h-4 text-yellow-500 animate-spin" />;
+      case 'failed':
+        return <AlertCircle className="w-4 h-4 text-red-500" />;
+      default:
+        return <Settings className="w-4 h-4 text-gray-500" />;
+    }
+  };
+
   const remainingDays = daysRemaining();
+
+  // Calculate total monthly cost
+  const totalCost = subscription.components.reduce((total, component) => {
+    const quantity = component.quantity || 1;
+    const unitPrice = typeof component.unitPrice === 'string' ? parseFloat(component.unitPrice) : component.unitPrice;
+    return total + (quantity * unitPrice);
+  }, 0);
 
   return (
     <div className="bg-white rounded-xl shadow-lg border border-gray-200 overflow-hidden max-w-2xl w-full">
@@ -80,9 +116,9 @@ export function SubscriptionDetails({ subscription, onClose, onCancel }: Subscri
         <div className="mb-8">
           <div className="bg-gray-50 rounded-lg p-4 mb-6">
             <div className="flex justify-between mb-2">
-              <span className="text-gray-600">Price</span>
+              <span className="text-gray-600">Total Cost</span>
               <span className="font-medium">
-                {formatCurrency(subscription.plan.price)}/{getIntervalLabel(subscription.plan.interval)}
+                {formatCurrency(totalCost)}/{getIntervalLabel(subscription.plan.interval)}
               </span>
             </div>
             <div className="flex justify-between mb-2">
@@ -98,6 +134,41 @@ export function SubscriptionDetails({ subscription, onClose, onCancel }: Subscri
             <div className="flex justify-between">
               <span className="text-gray-600">Next Billing Date</span>
               <span className="font-medium">{formatDate(subscription.next_billing_date)}</span>
+            </div>
+          </div>
+
+          <div className="mb-6">
+            <h3 className="text-sm font-medium text-gray-500 mb-4">Components</h3>
+            <div className="space-y-4">
+              {subscription.components.map((component, index) => (
+                <div key={index} className="bg-white border border-gray-200 rounded-lg p-4">
+                  <div className="flex items-start justify-between">
+                    <div className="flex items-start space-x-3">
+                      <Package className="w-5 h-5 text-purple-500 mt-1" />
+                      <div>
+                        <div className="font-medium text-gray-900">{component.name}</div>
+                        {component.description && (
+                          <div className="text-sm text-gray-500 mt-1">{component.description}</div>
+                        )}
+                        <div className="flex items-center space-x-2 mt-2">
+                          {getProvisioningStatusIcon(component.provisioningStatus)}
+                          <span className={`text-xs px-2 py-1 rounded-full ${getProvisioningStatusColor(component.provisioningStatus)}`}>
+                            {component.provisioningStatus}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                    <div className="text-right">
+                      <div className="font-medium text-gray-900">
+                        {formatCurrency(component.unitPrice)} × {component.quantity || 1}
+                      </div>
+                      <div className="text-sm text-gray-500 mt-1">
+                        {formatCurrency(parseFloat(component.unitPrice.toString()) * (component.quantity || 1))}/{getIntervalLabel(subscription.plan.interval)}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              ))}
             </div>
           </div>
 

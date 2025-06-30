@@ -1,5 +1,6 @@
 import React from 'react';
 import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
+import { Toaster } from 'react-hot-toast';
 import LandingPage from './pages/LandingPage';
 import { ClientPortal } from './pages/client/ClientPortal';
 import { ClientPortalRefactored } from './pages/client/ClientPortalRefactored';
@@ -7,6 +8,7 @@ import { AdminRoute } from './components/auth/AdminRoute';
 import { AdminRoutes } from './routes/AdminRoutes';
 import { TenantBranding } from './components/TenantBranding';
 import { useAuth } from './hooks/useAuth';
+import { PermissionsProvider } from './hooks/usePermissions';
 
 import { DevBottomBar } from './components/DevBottomBar';
 
@@ -17,7 +19,9 @@ function App() {
   const isDev = import.meta.env.DEV || import.meta.env.VITE_DEMO_MODE === 'true';
 
   return (
+    <PermissionsProvider>
     <div className={isDev ? 'pb-16' : ''}>
+      <Toaster position="top-right" />
       <Router
         future={{
           v7_startTransition: true,
@@ -79,6 +83,7 @@ function App() {
         <DevBottomBar />
       </Router>
     </div>
+    </PermissionsProvider>
   );
 }
 

@@ -15,6 +15,17 @@
   body {
     @apply bg-slate-900 text-white;
   }
+
+  /* Input text color overrides */
+  input, textarea, select {
+    @apply text-gray-900;
+  }
+
+  /* Dark mode inputs */
+  .dark input, .dark textarea, .dark select,
+  [data-theme="dark"] input, [data-theme="dark"] textarea, [data-theme="dark"] select {
+    @apply text-white bg-slate-700;
+  }
 }
 
 @layer components {
