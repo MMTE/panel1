@@ -24,7 +24,8 @@ import {
   Clock,
   DollarSign,
   LogIn,
-  UserPlus
+  UserPlus,
+  ExternalLink
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../hooks/useAuth';
@@ -211,6 +212,17 @@ const { mutate: createUser } = trpc.users.create.useMutation();`
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900">
+      {/* Sticky Bolt.new Badge */}
+      <a 
+        href="https://bolt.new" 
+        target="_blank" 
+        rel="noopener noreferrer" 
+        className="fixed bottom-20 right-4 z-50 bg-gradient-to-r from-purple-500 to-pink-500 text-white px-4 py-2 rounded-full hover:from-purple-600 hover:to-pink-600 transition-all duration-200 transform hover:scale-105 flex items-center space-x-2 shadow-lg hover:shadow-xl"
+      >
+        <span>Built with Bolt.new</span>
+        <ExternalLink className="w-4 h-4" />
+      </a>
+
       {/* Demo Mode Indicator */}
       
 
