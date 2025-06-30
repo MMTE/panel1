@@ -331,7 +331,7 @@ async function seedCatalogData() {
         }
       ]);
 
-    // Bandwidth Plans (Usage-based)
+    // Extra Bandwidth Plan (Pay-as-you-go)
     await db
       .insert(billingPlans)
       .values({
@@ -351,10 +351,9 @@ async function seedCatalogData() {
       });
 
     console.log('✅ Billing plans created');
-
     console.log('🎉 Catalog data seeded successfully!');
-    
-    // Show summary
+
+    // Print summary
     const componentCount = await db.select().from(components).where(eq(components.tenantId, tenant.id));
     const productCount = await db.select().from(products).where(eq(products.tenantId, tenant.id));
     const productComponentCount = await db.select().from(productComponents).where(eq(productComponents.tenantId, tenant.id));
@@ -365,7 +364,6 @@ async function seedCatalogData() {
     console.log(`   Products: ${productCount.length}`);
     console.log(`   Product Components: ${productComponentCount.length}`);
     console.log(`   Billing Plans: ${billingPlanCount.length}`);
-
   } catch (error) {
     console.error('❌ Error seeding catalog data:', error);
     throw error;
@@ -373,7 +371,7 @@ async function seedCatalogData() {
 }
 
 // Run if called directly
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (import.meta.url.startsWith('file:') && process.argv[1] === import.meta.url.slice(7)) {
   seedCatalogData()
     .then(() => {
       console.log('✅ Seeding completed');

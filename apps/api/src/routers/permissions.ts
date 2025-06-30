@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { router, adminProcedure, protectedProcedure } from '../trpc/trpc';
-import { permissionManager, Role, ResourceType, PermissionAction } from '../lib/auth/PermissionManager';
+import { permissionManager } from '../lib/auth/PermissionManager';
+import { Role, ResourceType, PermissionAction, Permission } from '../lib/auth/types';
 import { TRPCError } from '@trpc/server';
 import { db } from '../db';
 import { permissionGroups, permissionGroupItems } from '../db/schema/roles';
@@ -10,7 +11,7 @@ export const permissionsRouter = router({
   // Get all available permissions
   getAllPermissions: adminProcedure
     .query(async () => {
-      const permissions = permissionManager.getAllPermissions();
+      const permissions = await permissionManager.getAllPermissions();
       return permissions.map(permission => ({
         id: permission.id,
         resource: permission.resource,
@@ -26,8 +27,11 @@ export const permissionsRouter = router({
       role: z.nativeEnum(Role),
     }))
     .query(async ({ input }) => {
-      const permissionIds = permissionManager.getRolePermissions(input.role);
-      const permissions = permissionIds.map(id => permissionManager.getPermission(id)).filter(Boolean);
+      const permissionIds = await permissionManager.getRolePermissions(input.role);
+      const permissions = await Promise.all(
+        permissionIds.map(id => permissionManager.getPermission(id))
+      );
+      const validPermissions = permissions.filter((p): p is Permission => !!p);
       
       // Get permission groups that contain these permissions
       const groups = await db.query.permissionGroups.findMany({
@@ -44,11 +48,11 @@ export const permissionsRouter = router({
       
       return {
         role: input.role,
-        permissions: permissions.map(permission => ({
-          id: permission!.id,
-          resource: permission!.resource,
-          action: permission!.action,
-          description: permission!.description,
+        permissions: validPermissions.map(permission => ({
+          id: permission.id,
+          resource: permission.resource,
+          action: permission.action,
+          description: permission.description,
         })),
         groups: relevantGroups.map(group => ({
           id: group.id,
@@ -62,7 +66,7 @@ export const permissionsRouter = router({
   // Get available roles
   getAvailableRoles: adminProcedure
     .query(async () => {
-      const roles = permissionManager.getAvailableRoles();
+      const roles = await permissionManager.getAvailableRoles();
       return roles.map(role => ({
         value: role,
         label: role.replace(/_/g, ' ').toLowerCase().replace(/\b\w/g, l => l.toUpperCase()),
@@ -99,7 +103,7 @@ export const permissionsRouter = router({
         };
       }
 
-      const hasPermission = permissionManager.hasPermission(
+      const hasPermission = await permissionManager.hasPermission(
         userContext,
         input.permissionId,
         resourceContext
@@ -116,20 +120,23 @@ export const permissionsRouter = router({
   getMyPermissions: protectedProcedure
     .query(async ({ ctx }) => {
       const role = ctx.user.role as Role;
-      const permissionIds = permissionManager.getRolePermissions(role);
-      const permissions = permissionIds.map(id => permissionManager.getPermission(id)).filter(Boolean);
+      const permissionIds = await permissionManager.getRolePermissions(role);
+      const permissions = await Promise.all(
+        permissionIds.map(id => permissionManager.getPermission(id))
+      );
+      const validPermissions = permissions.filter((p): p is Permission => !!p);
       
       // Group permissions by resource type
-      const groupedPermissions = permissions.reduce((groups, permission) => {
-        const resource = permission!.resource;
+      const groupedPermissions = validPermissions.reduce((groups, permission) => {
+        const resource = permission.resource;
         if (!groups[resource]) {
           groups[resource] = [];
         }
         groups[resource].push({
-          id: permission!.id,
-          action: permission!.action,
-          description: permission!.description,
-          hasConditions: (permission!.conditions?.length || 0) > 0,
+          id: permission.id,
+          action: permission.action,
+          description: permission.description,
+          hasConditions: (permission.conditions?.length || 0) > 0,
         });
         return groups;
       }, {} as Record<ResourceType, any[]>);
@@ -149,7 +156,7 @@ export const permissionsRouter = router({
 
       return {
         role,
-        totalPermissions: permissions.length,
+        totalPermissions: validPermissions.length,
         permissions: groupedPermissions,
         groups: userGroups.map(group => ({
           id: group.id,
@@ -166,7 +173,7 @@ export const permissionsRouter = router({
       permissionId: z.string(),
     }))
     .query(async ({ input }) => {
-      const permission = permissionManager.getPermission(input.permissionId);
+      const permission = await permissionManager.getPermission(input.permissionId);
       
       if (!permission) {
         throw new TRPCError({
@@ -184,15 +191,21 @@ export const permissionsRouter = router({
         }
       });
 
+      const roles = await permissionManager.getAvailableRoles();
+      const rolePermissions = await Promise.all(
+        roles.map(role => permissionManager.getRolePermissions(role))
+      );
+      const rolesWithPermission = roles.filter((role, index) =>
+        rolePermissions[index].includes(permission.id)
+      );
+
       return {
         id: permission.id,
         resource: permission.resource,
         action: permission.action,
         description: permission.description,
         conditions: permission.conditions || [],
-        rolesWithPermission: permissionManager.getAvailableRoles().filter(role =>
-          permissionManager.getRolePermissions(role).includes(permission.id)
-        ),
+        rolesWithPermission,
         groups: groups.map(group => ({
           id: group.id,
           name: group.name,
@@ -204,7 +217,7 @@ export const permissionsRouter = router({
   // Get resource types and their permissions
   getResourcePermissions: adminProcedure
     .query(async () => {
-      const permissions = permissionManager.getAllPermissions();
+      const permissions = await permissionManager.getAllPermissions();
       const resourceGroups = permissions.reduce((groups, permission) => {
         const resource = permission.resource;
         if (!groups[resource]) {
@@ -229,8 +242,8 @@ export const permissionsRouter = router({
   // Get permission statistics
   getPermissionStats: adminProcedure
     .query(async () => {
-      const allPermissions = permissionManager.getAllPermissions();
-      const allRoles = permissionManager.getAvailableRoles();
+      const allPermissions = await permissionManager.getAllPermissions();
+      const allRoles = await permissionManager.getAvailableRoles();
       
       const stats = {
         totalPermissions: allPermissions.length,
@@ -242,7 +255,7 @@ export const permissionsRouter = router({
         rolePermissionCounts: {} as Record<Role, number>,
       };
 
-      // Count permissions by resource
+      // Count permissions by resource and action
       allPermissions.forEach(permission => {
         stats.permissionsByResource[permission.resource] = 
           (stats.permissionsByResource[permission.resource] || 0) + 1;
@@ -251,9 +264,10 @@ export const permissionsRouter = router({
       });
 
       // Count permissions per role
-      allRoles.forEach(role => {
-        stats.rolePermissionCounts[role] = permissionManager.getRolePermissions(role).length;
-      });
+      for (const role of allRoles) {
+        const rolePermissions = await permissionManager.getRolePermissions(role);
+        stats.rolePermissionCounts[role] = rolePermissions.length;
+      }
 
       return stats;
     }),
@@ -264,10 +278,12 @@ export const permissionsRouter = router({
  */
 function getRoleDescription(role: Role): string {
   switch (role) {
-    case Role.SUPER_ADMIN:
-      return 'Full system access with all permissions';
     case Role.ADMIN:
-      return 'Administrative access to most system functions';
+      return 'Full system access with all permissions';
+    case Role.STAFF:
+      return 'Internal staff member with elevated permissions';
+    case Role.AGENT:
+      return 'Support agent with customer service permissions';
     case Role.MANAGER:
       return 'Business operations and client management';
     case Role.SUPPORT_AGENT:

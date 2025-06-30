@@ -1,33 +1,48 @@
-import { pgTable, uuid, text, boolean, integer, timestamp, jsonb, pgEnum } from 'drizzle-orm/pg-core';
+import { pgTable, uuid, text, timestamp, jsonb, pgEnum, boolean, varchar, integer } from 'drizzle-orm/pg-core';
 import { relations } from 'drizzle-orm';
 import { tenants } from './tenants';
 
-export const gatewayStatusEnum = pgEnum('gateway_status', ['ACTIVE', 'INACTIVE', 'PENDING_SETUP', 'ERROR']);
+export const gatewayStatusEnum = pgEnum('gateway_status', [
+  'ACTIVE',
+  'INACTIVE',
+  'PENDING_SETUP',
+  'ERROR',
+  'TESTING',
+  'MAINTENANCE'
+]);
 
 export const paymentGatewayConfigs = pgTable('payment_gateway_configs', {
   id: uuid('id').primaryKey().defaultRandom(),
-  tenantId: uuid('tenant_id').references(() => tenants.id).notNull(),
-  gatewayName: text('gateway_name').notNull(), // stripe, paypal, razorpay, etc.
-  displayName: text('display_name').notNull(),
-  isActive: boolean('is_active').default(true),
-  priority: integer('priority').default(1), // Higher = preferred
-  config: jsonb('config'), // Encrypted gateway credentials
-  webhookUrl: text('webhook_url'),
-  webhookSecret: text('webhook_secret'),
-  supportedCurrencies: jsonb('supported_currencies').$type<string[]>().default(['USD']),
-  supportedCountries: jsonb('supported_countries').$type<string[]>().default(['US']),
-  capabilities: jsonb('capabilities').$type<{
-    supportsRecurring: boolean;
-    supportsRefunds: boolean;
-    supportsPartialRefunds: boolean;
-    supportsHolds: boolean;
-    supports3DSecure: boolean;
-    supportsWallets: string[];
-    supportedPaymentMethods: string[];
-  }>(),
+  gatewayName: varchar('gateway_name', { length: 50 }).notNull(),
+  displayName: varchar('display_name', { length: 100 }).notNull(),
   status: gatewayStatusEnum('status').default('PENDING_SETUP'),
+  isActive: boolean('is_active').default(false),
+  isDefault: boolean('is_default').default(false),
+  
+  // Configuration
+  config: jsonb('config').$type<Record<string, any>>().notNull(),
+  publicConfig: jsonb('public_config').$type<Record<string, any>>(),
+  
+  // Features and capabilities
+  supportedCurrencies: jsonb('supported_currencies').$type<string[]>(),
+  supportedPaymentMethods: jsonb('supported_payment_methods').$type<string[]>(),
+  features: jsonb('features').$type<string[]>(),
+  
+  // Integration settings
+  webhookUrl: varchar('webhook_url', { length: 255 }),
+  webhookSecret: varchar('webhook_secret', { length: 255 }),
+  apiEndpoint: varchar('api_endpoint', { length: 255 }),
+  
+  // Health monitoring
   lastHealthCheck: timestamp('last_health_check', { withTimezone: true }),
-  healthCheckStatus: text('health_check_status'), // 'healthy', 'error', 'warning'
+  healthCheckStatus: varchar('health_check_status', { length: 50 }),
+  errorMessage: text('error_message'),
+  
+  // Metadata
+  metadata: jsonb('metadata').$type<Record<string, any>>(),
+  
+  // Tenant and timestamps
+  tenantId: uuid('tenant_id').references(() => tenants.id).notNull(),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow(),
 });
@@ -46,12 +61,11 @@ export const paymentAttempts = pgTable('payment_attempts', {
 });
 
 // Relations
-export const paymentGatewayConfigsRelations = relations(paymentGatewayConfigs, ({ one, many }) => ({
+export const paymentGatewayConfigsRelations = relations(paymentGatewayConfigs, ({ one }) => ({
   tenant: one(tenants, {
     fields: [paymentGatewayConfigs.tenantId],
     references: [tenants.id],
   }),
-  attempts: many(paymentAttempts),
 }));
 
 export const paymentAttemptsRelations = relations(paymentAttempts, ({ one }) => ({

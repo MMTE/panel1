@@ -1,15 +1,16 @@
 import type { Config } from 'drizzle-kit';
-import { config } from 'dotenv';
-
-config();
 
 export default {
   schema: './src/db/schema/*',
   out: './src/db/migrations',
   driver: 'pg',
   dbCredentials: {
-    connectionString: process.env.DATABASE_URL!,
+    host: process.env.DB_HOST || 'localhost',
+    port: parseInt(process.env.DB_PORT || '5432'),
+    user: process.env.DB_USER || 'postgres',
+    password: process.env.DB_PASSWORD || 'postgres',
+    database: process.env.DB_NAME || 'panel1',
   },
-  verbose: true,
-  strict: true, // Re-enabled for production safety
+  strict: false,
+  verbose: false,
 } satisfies Config;

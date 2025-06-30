@@ -29,25 +29,51 @@ const PORT = process.env.API_PORT || 3001;
 // Security middleware
 app.use(helmet({
   crossOriginResourcePolicy: { policy: "cross-origin" },
-  crossOriginOpenerPolicy: { policy: "same-origin" }
+  crossOriginOpenerPolicy: { policy: "same-origin" },
+  contentSecurityPolicy: {
+    directives: {
+      defaultSrc: ["'self'"],
+      scriptSrc: ["'self'", "'unsafe-inline'", "'unsafe-eval'"],
+      styleSrc: ["'self'", "'unsafe-inline'"],
+      imgSrc: ["'self'", "data:", "blob:"],
+      connectSrc: ["'self'", "http://localhost:*", "ws://localhost:*"]
+    }
+  }
 }));
 
 app.use(cors({
   origin: (origin, callback) => {
     const allowedOrigins = [
-      'http://localhost:5173',
-      'http://localhost:5174',
-      'http://localhost:5175'
+      'http://localhost:3000',  // Common React dev port
+      'http://localhost:5173',  // Vite default
+      'http://localhost:5174',  // Vite alternate
+      'http://localhost:5175',  // Vite alternate
+      'http://localhost:8000',  // Another common dev port
+      'http://localhost:8080',  // Another common dev port
+      'http://127.0.0.1:5173', // Support for IPv4 loopback
+      'http://127.0.0.1:3000'  // Support for IPv4 loopback
     ];
-    if (!origin || allowedOrigins.includes(origin)) {
-      callback(null, true);
+    
+    // Allow all localhost origins in development
+    if (process.env.NODE_ENV === 'development') {
+      const localhostRegex = /^http:\/\/localhost:\d+$/;
+      if (!origin || localhostRegex.test(origin) || allowedOrigins.includes(origin)) {
+        callback(null, true);
+        return;
+      }
     } else {
-      callback(new Error('Not allowed by CORS'));
+      // In production, strictly check against allowedOrigins
+      if (!origin || allowedOrigins.includes(origin)) {
+        callback(null, true);
+        return;
+      }
     }
+    
+    callback(new Error('Not allowed by CORS'));
   },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'X-TRPC'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-TRPC', 'x-trpc-source'],
   exposedHeaders: ['set-cookie'],
   maxAge: 600 // 10 minutes
 }));

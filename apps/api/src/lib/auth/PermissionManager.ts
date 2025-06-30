@@ -1,8 +1,9 @@
 import { EventEmitter } from 'events';
 import { db } from '../../db';
-import { permissions, rolePermissions, users, roleHierarchy } from '../../db/schema';
+import { permissions, rolePermissions, users, roleHierarchy, permissionGroups, permissionGroupItems } from '../../db/schema';
 import { eq, and } from 'drizzle-orm';
 import { logger } from '../logging/Logger';
+import { Role, ResourceType, PermissionAction, Permission } from './types';
 
 // Permission actions
 export enum PermissionAction {
@@ -83,8 +84,7 @@ export interface UserPermissionContext {
   role: Role;
   tenantId?: string;
   clientId?: string;
-  permissions?: string[]; // Permission IDs from database
-  metadata?: Record<string, any>;
+  permissions: string[];
 }
 
 // Resource context for permission checks
@@ -99,7 +99,7 @@ export interface ResourceContext {
 
 export class PermissionManager extends EventEmitter {
   private static instance: PermissionManager;
-  private rolePermissions: Map<Role, Set<string>> = new Map();
+  private rolePermissions: Map<Role, string[]>;
   private roleHierarchy: Map<Role, Role[]> = new Map();
   private permissions: Map<string, Permission> = new Map();
   private permissionsCache: Map<string, Permission> = new Map();
@@ -108,8 +108,9 @@ export class PermissionManager extends EventEmitter {
 
   private constructor() {
     super();
+    this.rolePermissions = new Map();
+    this.initializeRolePermissions();
     this.initializePermissions();
-    this.initializeRoles();
     this.initializeRoleHierarchy();
   }
 
@@ -157,9 +158,9 @@ export class PermissionManager extends EventEmitter {
       for (const rolePerm of rolePerms) {
         const role = rolePerm.roleId as Role;
         if (!this.rolePermissions.has(role)) {
-          this.rolePermissions.set(role, new Set());
+          this.rolePermissions.set(role, []);
         }
-        this.rolePermissions.get(role)!.add(rolePerm.permissionName);
+        this.rolePermissions.get(role)!.push(rolePerm.permissionName);
       }
 
       // Update cache expiry
@@ -192,7 +193,7 @@ export class PermissionManager extends EventEmitter {
       const rolePermissions = this.rolePermissions.get(userContext.role);
       let hasDirectPermission = false;
       
-      if (rolePermissions?.has(permissionId)) {
+      if (rolePermissions?.includes(permissionId)) {
         hasDirectPermission = true;
       } else {
         // Check inherited permissions through role hierarchy
@@ -240,7 +241,7 @@ export class PermissionManager extends EventEmitter {
       // Check if any inherited role has the permission
       for (const { parentRole } of inheritedRoles) {
         const rolePermissions = this.rolePermissions.get(parentRole as Role);
-        if (rolePermissions?.has(permissionId)) {
+        if (rolePermissions?.includes(permissionId)) {
           return true;
         }
       }
@@ -257,8 +258,7 @@ export class PermissionManager extends EventEmitter {
    */
   async getUserPermissions(userContext: UserPermissionContext): Promise<string[]> {
     await this.loadPermissions();
-    const rolePermissions = this.rolePermissions.get(userContext.role);
-    return rolePermissions ? Array.from(rolePermissions) : [];
+    return this.rolePermissions.get(userContext.role) || [];
   }
 
   /**
@@ -266,8 +266,7 @@ export class PermissionManager extends EventEmitter {
    */
   async getRolePermissions(role: Role): Promise<string[]> {
     await this.loadPermissions();
-    const rolePermissions = this.rolePermissions.get(role);
-    return rolePermissions ? Array.from(rolePermissions) : [];
+    return this.rolePermissions.get(role) || [];
   }
 
   /**
@@ -427,85 +426,77 @@ export class PermissionManager extends EventEmitter {
    */
   private initializeRoles(): void {
     // Super Admin - Full access to everything
-    this.rolePermissions.set(Role.SUPER_ADMIN, new Set([
-      ...Array.from(this.permissions.keys())
-    ]));
+    this.rolePermissions.set(Role.SUPER_ADMIN, ['*']);
 
     // Admin - Most permissions except super admin functions
-    this.rolePermissions.set(Role.ADMIN, new Set([
-      'client.create', 'client.read', 'client.update', 'client.delete',
-      'user.create', 'user.read', 'user.update', 'user.delete',
-      'invoice.create', 'invoice.read', 'invoice.update', 'invoice.delete', 'invoice.process_payment',
-      'payment.create', 'payment.read', 'payment.read_sensitive', 'payment.refund',
-      'subscription.create', 'subscription.read', 'subscription.update', 'subscription.cancel',
-      'support_ticket.create', 'support_ticket.read', 'support_ticket.update', 'support_ticket.assign',
-      'domain.create', 'domain.read', 'domain.update', 'domain.delete',
-      'ssl_certificate.create', 'ssl_certificate.read', 'ssl_certificate.update', 'ssl_certificate.delete',
-      'system_settings.read', 'system_settings.update',
-      'audit_log.read',
-      'report.read', 'analytics.read',
-    ]));
+    this.rolePermissions.set(Role.ADMIN, [
+      'TENANT:*',
+      'USER:*',
+      'CLIENT:*',
+      'PRODUCT:*',
+      'COMPONENT:*',
+      'SUBSCRIPTION:*',
+      'INVOICE:*',
+      'PAYMENT:*',
+      'TICKET:*',
+      'PLAN:*',
+      'SYSTEM_SETTINGS:READ',
+      'ANALYTICS:READ'
+    ]);
 
     // Manager - Business operations without system admin
-    this.rolePermissions.set(Role.MANAGER, new Set([
-      'client.create', 'client.read', 'client.update',
-      'user.read', 'user.update',
-      'invoice.create', 'invoice.read', 'invoice.update', 'invoice.process_payment',
-      'payment.read', 'payment.refund',
-      'subscription.read', 'subscription.update', 'subscription.cancel',
-      'support_ticket.read', 'support_ticket.update', 'support_ticket.assign',
-      'domain.read', 'domain.update',
-      'ssl_certificate.read', 'ssl_certificate.update',
-      'report.read', 'analytics.read',
-    ]));
+    this.rolePermissions.set(Role.MANAGER, [
+      'CLIENT:*',
+      'PRODUCT:READ',
+      'COMPONENT:READ',
+      'SUBSCRIPTION:*',
+      'INVOICE:*',
+      'PAYMENT:*',
+      'TICKET:*',
+      'ANALYTICS:READ'
+    ]);
 
     // Support Agent - Support and limited client access
-    this.rolePermissions.set(Role.SUPPORT_AGENT, new Set([
-      'client.read',
-      'user.read',
-      'invoice.read',
-      'payment.read',
-      'subscription.read',
-      'support_ticket.create', 'support_ticket.read', 'support_ticket.update', 'support_ticket.assign',
-      'domain.read',
-      'ssl_certificate.read',
-    ]));
+    this.rolePermissions.set(Role.SUPPORT_AGENT, [
+      'TICKET:*',
+      'CLIENT:READ'
+    ]);
 
     // Billing Agent - Billing and payment focused
-    this.rolePermissions.set(Role.BILLING_AGENT, new Set([
-      'client.read',
-      'invoice.create', 'invoice.read', 'invoice.update', 'invoice.process_payment',
-      'payment.create', 'payment.read', 'payment.read_sensitive', 'payment.refund',
-      'subscription.read', 'subscription.update', 'subscription.cancel',
-      'report.read',
-    ]));
+    this.rolePermissions.set(Role.BILLING_AGENT, [
+      'INVOICE:*',
+      'PAYMENT:*',
+      'CLIENT:READ',
+      'SUBSCRIPTION:READ'
+    ]);
 
     // Reseller - Limited client and service management
-    this.rolePermissions.set(Role.RESELLER, new Set([
-      'client.create', 'client.read', 'client.update',
-      'invoice.read',
-      'subscription.read',
-      'support_ticket.create', 'support_ticket.read',
-      'domain.create', 'domain.read', 'domain.update',
-      'ssl_certificate.create', 'ssl_certificate.read',
-    ]));
+    this.rolePermissions.set(Role.RESELLER, [
+      'CLIENT:CREATE',
+      'CLIENT:READ',
+      'PRODUCT:READ',
+      'SUBSCRIPTION:CREATE',
+      'SUBSCRIPTION:READ',
+      'INVOICE:READ',
+      'PAYMENT:READ'
+    ]);
 
     // Client - Own resources only
-    this.rolePermissions.set(Role.CLIENT, new Set([
-      'client.read_own',
-      'invoice.read_own', 'invoice.process_payment',
-      'subscription.read_own', 'subscription.cancel_own',
-      'support_ticket.create', 'support_ticket.read_own',
-      'domain.read_own',
-    ]));
+    this.rolePermissions.set(Role.CLIENT, [
+      'SUBSCRIPTION:READ',
+      'INVOICE:READ',
+      'PAYMENT:READ',
+      'TICKET:CREATE',
+      'TICKET:READ'
+    ]);
 
     // Client User - Very limited access
-    this.rolePermissions.set(Role.CLIENT_USER, new Set([
-      'client.read_own',
-      'invoice.read_own',
-      'subscription.read_own',
-      'support_ticket.create', 'support_ticket.read_own',
-    ]));
+    this.rolePermissions.set(Role.CLIENT_USER, [
+      'SUBSCRIPTION:READ',
+      'INVOICE:READ',
+      'TICKET:CREATE',
+      'TICKET:READ'
+    ]);
   }
 
   /**
@@ -561,7 +552,7 @@ export class PermissionManager extends EventEmitter {
   private roleHasPermission(role: Role, permissionId: string): boolean {
     // Check direct permissions
     const rolePerms = this.rolePermissions.get(role);
-    if (rolePerms?.has(permissionId)) {
+    if (rolePerms?.includes(permissionId)) {
       return true;
     }
 
@@ -683,6 +674,126 @@ export class PermissionManager extends EventEmitter {
    */
   getAvailableRoles(): Role[] {
     return Object.values(Role);
+  }
+
+  private async initializeRolePermissions() {
+    // Initialize default role permissions
+    this.rolePermissions.set(Role.SUPER_ADMIN, ['*']);
+    this.rolePermissions.set(Role.ADMIN, [
+      'TENANT:*',
+      'USER:*',
+      'CLIENT:*',
+      'PRODUCT:*',
+      'COMPONENT:*',
+      'SUBSCRIPTION:*',
+      'INVOICE:*',
+      'PAYMENT:*',
+      'TICKET:*',
+      'PLAN:*',
+      'SYSTEM_SETTINGS:READ',
+      'ANALYTICS:READ'
+    ]);
+    this.rolePermissions.set(Role.MANAGER, [
+      'CLIENT:*',
+      'PRODUCT:READ',
+      'COMPONENT:READ',
+      'SUBSCRIPTION:*',
+      'INVOICE:*',
+      'PAYMENT:*',
+      'TICKET:*',
+      'ANALYTICS:READ'
+    ]);
+    this.rolePermissions.set(Role.SUPPORT_AGENT, [
+      'TICKET:*',
+      'CLIENT:READ'
+    ]);
+    this.rolePermissions.set(Role.BILLING_AGENT, [
+      'INVOICE:*',
+      'PAYMENT:*',
+      'CLIENT:READ',
+      'SUBSCRIPTION:READ'
+    ]);
+    this.rolePermissions.set(Role.RESELLER, [
+      'CLIENT:CREATE',
+      'CLIENT:READ',
+      'PRODUCT:READ',
+      'SUBSCRIPTION:CREATE',
+      'SUBSCRIPTION:READ',
+      'INVOICE:READ',
+      'PAYMENT:READ'
+    ]);
+    this.rolePermissions.set(Role.CLIENT, [
+      'SUBSCRIPTION:READ',
+      'INVOICE:READ',
+      'PAYMENT:READ',
+      'TICKET:CREATE',
+      'TICKET:READ'
+    ]);
+    this.rolePermissions.set(Role.CLIENT_USER, [
+      'SUBSCRIPTION:READ',
+      'INVOICE:READ',
+      'TICKET:CREATE',
+      'TICKET:READ'
+    ]);
+  }
+
+  public async getPermissionGroups() {
+    const groups = await db.select().from(permissionGroups);
+    const groupItems = await db.select().from(permissionGroupItems);
+
+    return groups.map(group => ({
+      id: group.id,
+      name: group.name,
+      description: group.description,
+      permissions: groupItems.filter(item => item.groupId === group.id)
+    }));
+  }
+
+  public async createPermissionGroup(name: string, description: string, permissionIds: string[]) {
+    const [group] = await db.insert(permissionGroups)
+      .values({
+        name,
+        description
+      })
+      .returning();
+
+    await db.insert(permissionGroupItems)
+      .values(permissionIds.map(permissionId => ({
+        groupId: group.id,
+        permissionId
+      })));
+
+    return group;
+  }
+
+  public async updatePermissionGroup(id: string, name: string, description: string, permissionIds: string[]) {
+    await db.delete(permissionGroupItems)
+      .where(eq(permissionGroupItems.groupId, id));
+
+    await db.insert(permissionGroupItems)
+      .values(permissionIds.map(permissionId => ({
+        groupId: id,
+        permissionId
+      })));
+
+    const [group] = await db.update(permissionGroups)
+      .set({
+        name,
+        description,
+        updatedAt: new Date()
+      })
+      .where(eq(permissionGroups.id, id))
+      .returning();
+
+    return group;
+  }
+
+  public async deletePermissionGroup(id: string) {
+    await db.delete(permissionGroupItems)
+      .where(eq(permissionGroupItems.groupId, id));
+
+    await db.delete(permissionGroups)
+      .where(eq(permissionGroups.id, id));
   }
 }
 

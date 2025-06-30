@@ -1,4 +1,4 @@
-import { pgTable, uuid, timestamp, boolean, pgEnum, text, integer, decimal, jsonb } from 'drizzle-orm/pg-core';
+import { pgTable, uuid, timestamp, boolean, pgEnum, text, integer, decimal, jsonb, varchar } from 'drizzle-orm/pg-core';
 import { relations } from 'drizzle-orm';
 import { clients } from './clients';
 import { plans } from './plans';
@@ -14,6 +14,8 @@ export const subscriptions = pgTable('subscriptions', {
   id: uuid('id').primaryKey().defaultRandom(),
   clientId: uuid('client_id').references(() => clients.id, { onDelete: 'cascade' }),
   planId: uuid('plan_id').references(() => plans.id),
+  planName: varchar('plan_name', { length: 255 }),
+  currency: varchar('currency', { length: 3 }).default('USD'),
   status: subscriptionStatusEnum('status').default('ACTIVE'),
   
   // Billing cycle information
