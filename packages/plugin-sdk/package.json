@@ -1,7 +1,7 @@
 {
   "name": "@panel1/plugin-sdk",
   "version": "0.1.0",
-  "description": "Plugin SDK for Panel1 platform",
+  "description": "Panel1 Plugin SDK",
   "private": true,
   "type": "module",
   "main": "./dist/index.js",
@@ -9,7 +9,7 @@
   "scripts": {
     "build": "tsc",
     "dev": "tsc --watch",
-    "lint": "eslint src --ext .ts",
+    "lint": "eslint .",
     "test": "vitest"
   },
   "dependencies": {

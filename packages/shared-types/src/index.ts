@@ -44,7 +44,7 @@ export const PlanSchema = z.object({
   currency: z.string(),
   interval: BillingIntervalSchema,
   isActive: z.boolean(),
-  features: z.any().nullable(),
+  features: z.record(z.string(), z.union([z.string(), z.number(), z.boolean()])).nullable(),
   createdAt: z.date(),
   updatedAt: z.date(),
 });

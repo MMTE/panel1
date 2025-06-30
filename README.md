@@ -1,92 +1,41 @@
-# Panel1 - Modern Billing & Provisioning Platform
+# Panel1 - Modern Hosting Control Panel
 
-## Overview
+Panel1 is a next-generation hosting control panel built with modern technologies and a focus on extensibility.
 
-Panel1 is an enterprise-grade billing and provisioning platform designed for modern hosting providers. It offers comprehensive features including subscription management, automated provisioning, multi-tenant support, and extensive plugin capabilities.
+## Version 0.1.0 Release Notes
 
-## Current Implementation Status
+This is the initial release of Panel1, focusing on core functionality and establishing the foundation for future development.
 
-### 🟢 Production-Ready Features (95%+ Complete)
+### Key Features
 
-1. **Authentication & Security**
-   - Production JWT system with secure session management
-   - Complete audit logging
-   - Encryption service for secrets at rest (AES-256-GCM)
+- **Multi-tenant Architecture**: Complete isolation with tenant management and branding support
+- **Professional Invoice System**: Sequential numbering, PDF generation, multi-currency support
+- **Advanced Payment Processing**: Stripe integration, multi-gateway architecture, refund system
+- **Subscription Automation**: BullMQ + Redis job processing, dunning management
+- **Provisioning Engine**: cPanel/WHM integration, plugin architecture
+- **Plugin System**: Complete SDK, CLI tools, runtime loading
+- **Support System**: Ticket lifecycle management, SLA management
 
-2. **Invoice System**
-   - Sequential numbering with tenant isolation
-   - PDF generation with professional layouts
-   - Multi-currency support (28+ currencies)
-   - Automated email notifications
+### Known Limitations
 
-3. **Payment Processing**
-   - Stripe integration with 3D Secure
-   - Multi-gateway architecture
-   - Refund system (full/partial)
-   - Payment retry logic
+1. **Type System**: Some TypeScript strict checks are temporarily disabled for this release. See `docs/TECHNICAL_DEBT.md` for details.
+2. **Role-based Access**: Basic roles implemented, granular permissions in development
+3. **Internationalization**: Framework ready, translations in progress
 
-4. **Subscription Automation**
-   - BullMQ + Redis job processing
-   - Advanced dunning management
-   - Proration calculations
-   - State change tracking
+### Technology Stack
 
-5. **Provisioning Engine**
-   - Plugin architecture
-   - cPanel/WHM integration
-   - Health monitoring
-   - Async job processing
+- **Backend**: Node.js with TypeScript
+- **Frontend**: React with TypeScript
+- **Database**: PostgreSQL with Drizzle ORM
+- **API Layer**: tRPC
+- **Job Processing**: BullMQ + Redis
+- **Container Support**: Docker for development
 
-6. **Plugin System**
-   - Complete SDK with TypeScript
-   - CLI tools
-   - Runtime loading
-   - UI slot injection
-
-7. **Multi-Tenant Architecture**
-   - Complete tenant isolation
-   - Branding support
-   - Per-tenant configuration
-
-8. **Support System**
-   - Ticket lifecycle management
-   - SLA management
-   - Knowledge base
-   - Email integration
-
-### 🟡 In Development (60-80% Complete)
-
-1. **Catalog System**
-   - ✅ Product listing and deletion
-   - ✅ Basic component registration
-   - 🚧 ProductBuilder form (in progress)
-   - 🚧 Save/update workflow (pending)
-
-2. **Role-Based Access Control (70%)**
-   - ✅ Basic role separation
-   - ✅ Authentication middleware
-   - 🚧 Granular permissions
-   - 🚧 Multi-level access controls
-
-3. **Internationalization (60%)**
-   - ✅ i18n framework
-   - ✅ RTL support
-   - 🚧 Language pack system
-   - 🚧 Translation management
-
-## Getting Started
-
-### Prerequisites
-- Node.js 18+
-- Docker and Docker Compose
-- PostgreSQL 15+
-- Redis 6+
-
-### Development Setup
+### Quick Start
 
 1. Clone the repository:
 ```bash
-git clone https://github.com/your-org/panel1-bolt.git
+git clone https://github.com/yourusername/panel1-bolt.git
 cd panel1-bolt
 ```
 
@@ -100,32 +49,32 @@ docker compose up -d
 npm install
 ```
 
-4. Start development server:
+4. Start development servers:
 ```bash
 npm run dev
 ```
 
-## Project Structure
+### Development Environment
 
-- `apps/api/` - Backend API server
-- `apps/web/` - Frontend React application
-- `packages/` - Shared packages and SDKs
-- `plugins/` - Official and example plugins
-- `docs/` - Detailed documentation
+The development environment uses Docker for infrastructure services:
+- PostgreSQL
+- Redis
+- MailHog
 
-## Documentation
+The application code runs locally for fast development iteration.
 
-Detailed documentation is available in the `docs/` directory:
+### Documentation
 
-- [Architecture Guide](docs/ARCHITECTURE.md)
-- [Plugin Development](docs/PLUGIN_DEVELOPMENT.md)
+- [Architecture Overview](docs/ARCHITECTURE.md)
 - [API Standards](docs/API_STANDARDS.md)
+- [Plugin Development](docs/PLUGIN_DEVELOPMENT.md)
 - [Security Guidelines](docs/SECURITY.md)
+- [Technical Debt](docs/TECHNICAL_DEBT.md)
 
-## Contributing
+### Contributing
 
-Please read [CONTRIBUTING.md](CONTRIBUTING.md) for details on our code of conduct and the process for submitting pull requests.
+We welcome contributions! Please see our [Contributing Guide](CONTRIBUTING.md) for details.
 
-## License
+### License
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+This project is licensed under the [MIT License](LICENSE).

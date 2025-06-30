@@ -1,7 +1,7 @@
 {
   "name": "@panel1/shared-types",
   "version": "0.1.0",
-  "description": "Shared TypeScript types and Zod schemas for Panel1",
+  "description": "Shared TypeScript types for Panel1",
   "private": true,
   "type": "module",
   "main": "./dist/index.js",
@@ -9,7 +9,7 @@
   "scripts": {
     "build": "tsc",
     "dev": "tsc --watch",
-    "lint": "eslint src --ext .ts",
+    "lint": "eslint .",
     "test": "vitest"
   },
   "dependencies": {

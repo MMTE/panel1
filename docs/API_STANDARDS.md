@@ -1,8 +1,87 @@
-# Panel1 API Standards
+# API Design Standards
 
-## Overview
+This document outlines the standards and best practices for designing and implementing APIs in Panel1. Consistency in the API is crucial for maintainability, developer experience, and frontend integration.
 
-Panel1 uses tRPC for type-safe API development with end-to-end type safety between the backend and frontend.
+## Core Principles
+
+1.  **Type Safety First**: We use **tRPC** to achieve end-to-end type safety. There is no code generation; types are inferred directly from your backend router definitions.
+2.  **Explicit is Better than Implicit**: API inputs and outputs should be clearly defined. Use **Zod** for validation to ensure all data is explicit and validated at the runtime boundary.
+3.  **Standardized Error Handling**: Errors should be consistent and provide meaningful information to the client.
+
+## tRPC Router Structure
+
+All API code resides in `apps/api/src/routers/`. Each major feature or resource (e.g., `invoices`, `clients`, `subscriptions`) should have its own router file.
+
+-   Routers are created using `createTRPCRouter` from `~/trpc/trpc.ts`.
+-   Individual procedures (endpoints) can be `query` (for data fetching) or `mutation` (for data modification).
+-   Routers are combined in the main app router in `apps/api/src/routers/index.ts`.
+
+### Example Router
+
+```typescript
+// apps/api/src/routers/example.ts
+import { z } from 'zod';
+import { createTRPCRouter, protectedProcedure } from '~/trpc/trpc';
+
+export const exampleRouter = createTRPCRouter({
+  getExample: protectedProcedure
+    .input(z.object({ id: z.string() }))
+    .query(async ({ ctx, input }) => {
+      // ctx.db and ctx.session are available here
+      return { message: `Hello, ${input.id}` };
+    }),
+
+  updateExample: protectedProcedure
+    .input(z.object({ id: z.string(), data: z.any() }))
+    .mutation(async ({ ctx, input }) => {
+      // Perform update logic
+      return { success: true };
+    }),
+});
+```
+
+## Procedures (`protectedProcedure` vs `publicProcedure`)
+
+-   **`protectedProcedure`**: Use this for any procedure that requires an authenticated user. It automatically checks for a valid session and adds the `session` and `db` objects to the context (`ctx`). This should be your default choice.
+-   **`publicProcedure`**: Only use this for procedures that are genuinely public, such as login, registration, or public data endpoints.
+
+## Input Validation with Zod
+
+-   **Always validate inputs**. Every procedure that accepts input must define a Zod schema using `.input()`.
+-   Be as specific as possible with your schemas (e.g., `z.string().email()` instead of `z.string()`).
+-   For complex objects, define a reusable Zod schema.
+
+## Error Handling
+
+tRPC handles errors gracefully. To throw an error from a procedure, use `TRPCError` from `@trpc/server`.
+
+```typescript
+import { TRPCError } from '@trpc/server';
+
+// Inside a procedure
+if (!item) {
+  throw new TRPCError({
+    code: 'NOT_FOUND',
+    message: `Item with ID ${input.id} not found.`,
+  });
+}
+```
+
+### Common Error Codes
+
+-   `NOT_FOUND`: The requested resource does not exist.
+-   `UNAUTHORIZED`: The user is not logged in.
+-   `FORBIDDEN`: The user is logged in but does not have permission to perform the action.
+-   `BAD_REQUEST`: The input is invalid or malformed (though Zod validation often catches this).
+-   `INTERNAL_SERVER_ERROR`: For unexpected server errors.
+
+## Naming Conventions
+
+-   **Routers**: Use camelCase followed by `Router` (e.g., `invoiceRouter`).
+-   **Procedures**: Use camelCase. Start with a verb (e.g., `getInvoice`, `createClient`, `deleteSubscription`).
+-   **Consistency is key**. Look at existing routers for examples.
+
+By adhering to these standards, we ensure that the Panel1 API remains robust, predictable, and easy to work with.
 
 ## API Design Principles
 

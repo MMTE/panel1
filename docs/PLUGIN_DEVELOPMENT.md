@@ -1,8 +1,132 @@
-# Panel1 Plugin Development Guide
+# Plugin Development Guide
+
+This guide provides developers with the necessary information to build, test, and publish plugins for Panel1.
 
 ## Overview
 
-Panel1's plugin system allows developers to extend the platform's functionality through a standardized SDK and development workflow.
+The Panel1 plugin system allows you to extend and customize the platform's functionality. Plugins can introduce new features, integrate with third-party services, or modify existing behaviors. They are first-class citizens in the Panel1 ecosystem.
+
+## Core Concepts
+
+-   **Isolation**: Plugins operate in an isolated manner to ensure they do not interfere with the core system's stability.
+-   **Lifecycle Hooks**: Plugins can execute code at specific points in the application lifecycle (e.g., on activation, deactivation).
+-   **Extensibility**: Plugins can register new API endpoints, add UI components, and listen to system-wide events.
+
+## Getting Started: Creating a Plugin
+
+The easiest way to start is by using the `plugin-cli` to scaffold a new project.
+
+```bash
+# Install the CLI globally (or use npx)
+pnpm install -g @panel1/plugin-cli
+
+# Scaffold a new plugin
+p1-cli scaffold
+```
+
+Follow the prompts to create a new plugin. This will generate a directory with a standard structure, including a `plugin.json` manifest and a basic `index.ts`.
+
+## The `plugin.json` Manifest
+
+This file is the entry point for your plugin. It contains metadata that Panel1 uses to load and manage it.
+
+```json
+{
+  "name": "My Awesome Plugin",
+  "version": "1.0.0",
+  "description": "A brief description of what this plugin does.",
+  "author": "Your Name",
+  "panel1Version": "^1.0.0",
+  "main": "dist/index.js"
+}
+```
+
+## Plugin Structure (`index.ts`)
+
+Your main plugin file must export a class that extends `BasePlugin` from the `@panel1/plugin-sdk`.
+
+```typescript
+import { BasePlugin, PluginContext } from '@panel1/plugin-sdk';
+
+export default class MyAwesomePlugin extends BasePlugin {
+  constructor(context: PluginContext) {
+    super(context);
+    this.logger.info('My Awesome Plugin has been initialized!');
+  }
+
+  async onActivate() {
+    this.logger.info('Plugin activated!');
+    // Register routes, event listeners, etc.
+  }
+
+  async onDeactivate() {
+    this.logger.info('Plugin deactivated!');
+    // Clean up resources.
+  }
+}
+```
+
+### The `PluginContext`
+
+The `PluginContext` object is passed to your plugin's constructor and provides access to core Panel1 services:
+-   `logger`: A dedicated logger instance for your plugin.
+-   `eventBus`: For subscribing to and emitting system events.
+-   `api`: For registering new tRPC routes.
+-   `ui`: For registering frontend components and routes.
+
+## Extending the Backend
+
+You can extend the tRPC API by defining new routers and registering them within your plugin.
+
+```typescript
+// Inside your onActivate method
+this.context.api.registerRouter('myPlugin', myPluginRouter);
+```
+
+## Extending the Frontend
+
+The frontend can be extended by registering new UI components or routes. This is typically done to add new pages to the admin dashboard or inject components into existing pages.
+
+### UI Slots
+
+The `UISlotManager` allows you to inject components into predefined "slots" in the UI.
+
+```typescript
+// Inside your onActivate method
+this.context.ui.registerComponent('DASHBOARD_WIDGET', {
+  id: 'my-awesome-widget',
+  component: () => import('./components/MyWidget'),
+});
+```
+
+### Custom Routes
+
+You can add new top-level routes to the admin area.
+
+```typescript
+// Inside your onActivate method
+this.context.ui.registerRoute({
+  path: '/my-plugin',
+  component: () => import('./pages/MyPluginPage'),
+  exact: true,
+  sidebar: {
+    label: 'My Plugin',
+    icon: 'PuzzlePieceIcon',
+  },
+});
+```
+
+## Development Workflow
+
+1.  **Build your plugin**: Run `pnpm build` within your plugin directory. This will compile your TypeScript code.
+2.  **Install the plugin**: Use the CLI to install the plugin into your local Panel1 instance.
+    ```bash
+    p1-cli install --path /path/to/your/plugin
+    ```
+3.  **Activate the plugin**: Navigate to the Plugins page in the Panel1 admin UI and activate your new plugin.
+4.  **Test**: Verify that your plugin's functionality is working as expected.
+
+This guide covers the basics of plugin development. For more advanced topics, refer to the example plugins in the `/plugins` directory of the main Panel1 repository.
 
 ## Plugin Architecture
 
