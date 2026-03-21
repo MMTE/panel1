@@ -1,8 +1,19 @@
 # Panel1 Migration Roadmap
 
-> Last updated: March 2026
+> Last updated: March 21, 2026
 > Breaking changes: allowed (no public release yet)
 > Sources: ARCHITECTURE.md, domain-model-report, modularity-analysis, cleanup-map, types-architecture spec, deep-architecture-research, claude-01, gpt-001
+
+---
+
+## Progress Tracker
+
+| Phase | Progress | Blocking Issues |
+|-------|----------|-----------------|
+| **Phase 0** | ✅ 100% | — |
+| **Phase 1** | 🟡 25% (1 of 8) | 1.3, 1.4 block module jobs |
+| **Phase 2** | ⏸️ 0% | Blocked by 1.3-1.5 |
+| **Phase 3-6** | ⏸️ 0% | Blocked by Phase 2 |
 
 ---
 
@@ -11,15 +22,15 @@
 | Component | Status |
 |-----------|--------|
 | **Database** | 53 tables across 12 domains. Monolithic barrel (`db/schema/index.ts`) with duplicate DB connection. |
-| **`packages/core`** | Loader, services, filters work. EventBus in-memory only (42 LOC). JobScheduler is a dead stub (22 LOC). No auth middleware. No infra services. |
+| **`packages/core`** | Loader, services, filters work. Auth/tenant/permission middleware done. EventBus in-memory only (42 LOC). JobScheduler is a dead stub (22 LOC). Infra services not yet moved. |
 | **`packages/types`** | Exists but needs slimming — should be framework-only contracts. Module service interfaces should move to each module's `types.ts`. |
-| **`modules/support`** | 22 Hono endpoints, 9 tables, ~85% backend. No UI dir. Jobs stubbed. SLA metrics stubbed. |
-| **`modules/audit`** | 9 Hono endpoints, 3 tables, ~80% backend. No UI dir. Export processing missing. Cleanup job stubbed. |
-| **`apps/api`** | Express + tRPC (20 routers). Hono bridged via Express adapter. Two parallel event systems (legacy BullMQ + core in-memory). Module routes have zero auth. |
+| **`modules/support`** | 22 Hono endpoints, 9 tables, ~85% backend. **Auth wired** via global middleware. No UI dir. Jobs stubbed (scheduler doesn't execute). SLA metrics stubbed. |
+| **`modules/audit`** | 9 Hono endpoints, 3 tables, ~80% backend. **Auth wired** via global middleware. No UI dir. Export processing missing. Cleanup job stubbed. |
+| **`apps/api`** | Express + tRPC (20 routers). Hono bridged via Express adapter. Two parallel event systems (legacy BullMQ + core in-memory). Module routes now have auth via global Hono middleware. |
 | **`apps/web`** | Hardcoded routes, tRPC client. Support/audit pages call dead tRPC endpoints. Old plugin UI system is stubs. |
-| **Permissions** | Three incompatible naming conventions. Module permissions declared but never enforced. |
-| **Obsolete packages** | `plugin-sdk`, `plugin-cli`, `shared-types` — all replaced by new architecture. |
-| **Dead code** | Root `src/lib/plugins/`, example plugins, 7 test scripts, abandoned `apps/api/src/modules/billing/`, `dump.rdb`, outdated docs. |
+| **Permissions** | Three incompatible naming conventions. Module permissions declared. Auth middleware uses legacy `PermissionManager` with legacy names. |
+| **Obsolete packages** | ✅ Removed: `plugin-sdk`, `plugin-cli`, `shared-types`. |
+| **Dead code** | ✅ Cleaned: obsolete plugins, test scripts, outdated docs. |
 
 ---
 
@@ -99,41 +110,29 @@ Goal: remove dead code and stale files. Zero risk — none of this code is refer
 
 Goal: make `@panel1/core` production-capable before migrating revenue-critical domains.
 
-### Issue 1.1: Shared Hono Auth/Tenant/Permission Middleware
+### Issue 1.1: Shared Hono Auth/Tenant/Permission Middleware ✅ COMPLETE
 
 **Why first**: Module routes are completely unprotected. Support and audit trust client-supplied `tenantId`/`userId` headers with zero verification.
 
-**Current state**:
-- tRPC auth: `trpc/context.ts` extracts Bearer token → `getSessionByToken()` → DB lookup joining sessions+users → returns `{ user, tenantId }`
-- tRPC permission: `requirePermission()` middleware calls `permissionManager.hasPermission()` using async DB-backed path
-- Hono auth: **does not exist anywhere** — zero middleware in `packages/core/`, `modules/support/`, `modules/audit/`
-- Module routes read `x-tenant-id` from headers and `userId` from request body — trust-based
+**Completed March 2026** — All middleware created and wired to `/api/*` routes.
 
 **Tasks**:
-- [ ] Create `packages/core/src/middleware/auth.ts` — Hono middleware:
-  - Extract Bearer token from Authorization header
-  - Validate session via DB lookup (port the `getSessionByToken` logic from `lib/auth.ts` — joins `sessions` + `users` where `token = ? AND expiresAt >= now()`)
-  - Set `user: { id, email, firstName, lastName, role, tenantId }` on Hono context via `c.set('user', ...)`
-  - Set `tenantId` on Hono context from the authenticated user (never from headers)
-  - Return 401 JSON response on missing/invalid/expired token
-- [ ] Create `packages/core/src/middleware/requirePermission.ts` — Hono middleware factory:
-  - `requirePermission('support.tickets.view')` returns middleware
-  - Reads user from Hono context (`c.get('user')`)
-  - Checks permission via `PermissionManager.hasPermission()` (the async DB-backed path)
-  - Returns 403 JSON response on failure
-  - Support OR semantics: `requirePermission('billing.invoices.view', 'billing.invoices.view_own')` — passes if user has any
-- [ ] Create `packages/core/src/middleware/tenant.ts` — Hono middleware:
-  - Reads `tenantId` from authenticated user context (never from headers/query)
-  - Rejects requests where user has no tenant with 400
-  - Makes `tenantId` available via `c.get('tenantId')`
-- [ ] Create `packages/core/src/middleware/publicRoute.ts` — escape hatch for endpoints that don't need auth (e.g., webhook receivers, health checks)
-- [ ] Export all middleware from `packages/core/src/index.ts`
-- [ ] Update `apps/api/src/index.ts` to apply auth middleware globally to the Hono app that handles `/api/*` module routes
-- [ ] Define Hono context type augmentation so `c.get('user')` and `c.get('tenantId')` are type-safe
-- [ ] Write tests: valid token, expired token, missing token, wrong tenant, permission denied, permission granted, public route bypass
+- [x] Create `packages/core/src/middleware/auth.ts` — `createBearerAuthMiddleware()`
+- [x] Create `packages/core/src/middleware/requirePermission.ts` — factory with OR semantics
+- [x] Create `packages/core/src/middleware/tenant.ts` — `createTenantContextMiddleware()`
+- [x] Create `packages/core/src/middleware/public.ts` — `publicRoute()` escape hatch
+- [x] Export all middleware from `packages/core/src/index.ts`
+- [x] Update `apps/api/src/index.ts` to apply auth middleware globally to Hono app
+- [x] Define Hono context type augmentation in `packages/core/src/hono-env.d.ts`
+- [x] Write tests in `packages/core/src/__tests__/middleware.test.ts`
+
+**Implementation details**:
+- `apps/api/src/hono/security.ts` — wires middleware to `PermissionManager.hasPermission()` and `getSessionByToken()`
+- Global middleware applied: `apiBearerAuthMiddleware` + `apiTenantMiddleware` on all `/api/*`
+- `requirePermission` factory passed to `bootModules()` for per-module use
 
 **Depends on**: nothing
-**Blocks**: every module route is insecure without this
+**Blocks**: ~~every module route is insecure without this~~ RESOLVED
 
 ---
 
@@ -386,12 +385,18 @@ Goal: make `@panel1/core` production-capable before migrating revenue-critical d
 
 **Why**: `apps/api/src/db/schema/index.ts` creates a second Drizzle `db` instance alongside `apps/api/src/db/index.ts`. Some code imports from one, some from the other.
 
+**Current state (verified March 21)**:
+- `db/index.ts` lines 19-22: creates `drizzle(client, { schema })`
+- `db/schema/index.ts` lines 41-50: creates ANOTHER `drizzle(client, { schema: {...} })`
+- Both export `db` — import confusion confirmed
+
 **Tasks**:
 - [ ] Remove the DB connection from `db/schema/index.ts` — keep it as a pure schema barrel export only
 - [ ] Ensure all code imports `db` from `db/index.ts` (or from core's `DbManager` for module code)
 - [ ] Verify no double-connection at runtime
 
 **Depends on**: nothing
+**Effort**: Small (1-2 hours)
 
 ---
 
@@ -751,29 +756,31 @@ Seed data, environment setup docs, deployment guide, known limitations.
 ## Dependency Graph
 
 ```
-Phase 0 (cleanup) ──── no dependencies, safe to do anytime
+Phase 0 (cleanup) ──── no dependencies, safe to do anytime       ✅ DONE
        │
        ▼
-1.1 Auth Middleware ─────────┐
-1.2 Permission Naming ───────┤
-1.3 EventBus (BullMQ) ───────┼── 1.6 Boot Lifecycle ──┐
-1.4 JobScheduler (BullMQ) ───┤                         │
-1.5 Infra Services ──────────┤   1.7 Retire Legacy ────┘
-1.8 Fix Duplicate DB ────────┘
+1.1 Auth Middleware ─────────┐                                   ✅ DONE
+1.2 Permission Naming ───────┤                                   ⏳ TODO
+1.3 EventBus (BullMQ) ───────┼── 1.6 Boot Lifecycle ──┐          ⏳ TODO ← CRITICAL
+1.4 JobScheduler (BullMQ) ───┤                         │          ⏳ TODO ← CRITICAL
+1.5 Infra Services ──────────┤   1.7 Retire Legacy ────┘          ⏳ TODO
+1.8 Fix Duplicate DB ────────┘                                    ⏳ TODO
                               │
                  ┌────────────┴────────────┐
                  ▼                         ▼
-           2.1 Support Backend       2.2 Audit Backend
+           2.1 Support Backend       2.2 Audit Backend            BLOCKED
                  │                         │
                  ▼                         ▼
-           2.3 Support UI            2.4 Audit UI
+           2.3 Support UI            2.4 Audit UI                 BLOCKED
                  │                         │
                  └────────────┬────────────┘
                               ▼
-                       2.5 Integration Tests
+                       2.5 Integration Tests                      BLOCKED
                               │
                               ▼
-          Phase 3 (Revenue Path) → Phase 4 → Phase 5 → Phase 6
+          Phase 3 (Revenue Path) → Phase 4 → Phase 5 → Phase 6    BLOCKED
+
+NEXT PRIORITY: 1.3 + 1.4 (EventBus + JobScheduler must work for module jobs)
 ```
 
 ---
