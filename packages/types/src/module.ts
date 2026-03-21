@@ -39,6 +39,12 @@ export interface ModuleContext {
   config: Record<string, unknown>;
   logger: Logger;
   email?: EmailTransport;
+
+  /**
+   * Injected by host app (`apps/api` boot). Hono middleware factory; OR semantics across ids.
+   * Canonical permission names: see ARCHITECTURE.md / roadmap issue 1.2 (seed may still use legacy ids).
+   */
+  requirePermission?: (...permissionIds: string[]) => unknown;
 }
 
 export interface EmailTransport {

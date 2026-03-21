@@ -1,6 +1,17 @@
 import { OpenAPIHono, createRoute, z } from '@hono/zod-openapi';
+import type { MiddlewareHandler } from 'hono';
+import type { Panel1AuthUser } from '@panel1/core';
 import type { ModuleContext } from '@panel1/types';
 import type { ISupportService, CreateTicketInput, AddMessageInput } from './types.js';
+import { SEED_PERM } from './seed-permissions.js';
+
+function routePerm(ctx: ModuleContext, ...ids: string[]): MiddlewareHandler[] {
+  const rp = ctx.requirePermission;
+  if (!rp) {
+    throw new Error('@panel1/mod-support: host must pass requirePermission via bootModules()');
+  }
+  return [rp(...ids) as MiddlewareHandler];
+}
 
 const TicketSchema = z.object({
   id: z.string(),
@@ -56,7 +67,6 @@ const listTicketsRoute = createRoute({
   path: '/tickets',
   request: {
     query: z.object({
-      tenantId: z.string().optional(),
       status: z.string().optional(),
       priority: z.string().optional(),
       categoryId: z.string().optional(),
@@ -134,8 +144,6 @@ const createTicketRoute = createRoute({
               mimeType: z.string(),
               url: z.string(),
             })).default([]),
-            tenantId: z.string().min(1),
-            createdById: z.string().min(1),
           }),
         },
       },
@@ -169,7 +177,6 @@ const addMessageRoute = createRoute({
               url: z.string(),
             })).default([]),
             timeSpent: z.number().optional(),
-            tenantId: z.string().min(1),
           }),
         },
       },
@@ -192,8 +199,6 @@ const updateTicketStatusRoute = createRoute({
           schema: z.object({
             status: z.enum(['OPEN', 'IN_PROGRESS', 'WAITING_CUSTOMER', 'WAITING_STAFF', 'RESOLVED', 'CLOSED']),
             reason: z.string().optional(),
-            tenantId: z.string().min(1),
-            userId: z.string().optional(),
           }),
         },
       },
@@ -210,13 +215,6 @@ const assignTicketRoute = createRoute({
   path: '/tickets/{id}/assign',
   request: {
     params: z.object({ id: z.string() }),
-    body: {
-      content: {
-        'application/json': {
-          schema: z.object({ tenantId: z.string().min(1) }),
-        },
-      },
-    },
   },
   responses: {
     200: {
@@ -231,9 +229,7 @@ const assignTicketRoute = createRoute({
 const listCategoriesRoute = createRoute({
   method: 'get',
   path: '/categories',
-  request: {
-    query: z.object({ tenantId: z.string() }),
-  },
+  request: {},
   responses: {
     200: {
       content: { 'application/json': { schema: z.array(z.object({ id: z.string(), name: z.string(), description: z.string().nullable(), color: z.string().nullable(), icon: z.string().nullable(), sortOrder: z.number().nullable(), isActive: z.boolean().nullable() })) } },
@@ -257,7 +253,6 @@ const createCategoryRoute = createRoute({
             parentCategoryId: z.string().optional(),
             sortOrder: z.number().default(0),
             defaultAssigneeId: z.string().optional(),
-            tenantId: z.string().min(1),
           }),
         },
       },
@@ -282,7 +277,6 @@ const listKbArticlesRoute = createRoute({
       search: z.string().optional(),
       limit: z.coerce.number().min(1).max(50).default(20),
       offset: z.coerce.number().min(0).default(0),
-      tenantId: z.string().optional(),
     }),
   },
   responses: {
@@ -316,7 +310,6 @@ const getKbArticleRoute = createRoute({
   path: '/kb/articles/{slug}',
   request: {
     params: z.object({ slug: z.string() }),
-    query: z.object({ tenantId: z.string().optional() }),
   },
   responses: {
     200: {
@@ -330,9 +323,7 @@ const getKbArticleRoute = createRoute({
 const listKbCategoriesRoute = createRoute({
   method: 'get',
   path: '/kb/categories',
-  request: {
-    query: z.object({ tenantId: z.string().optional() }),
-  },
+  request: {},
   responses: {
     200: {
       content: { 'application/json': { schema: z.array(z.object({ id: z.string(), name: z.string(), description: z.string().nullable(), icon: z.string().nullable(), isPublic: z.boolean().nullable() })) } },
@@ -372,9 +363,7 @@ const searchKbRoute = createRoute({
 const getStatsRoute = createRoute({
   method: 'get',
   path: '/stats',
-  request: {
-    query: z.object({ tenantId: z.string() }),
-  },
+  request: {},
   responses: {
     200: {
       content: {
@@ -399,7 +388,7 @@ const getStatsRoute = createRoute({
 const listSlaProfilesRoute = createRoute({
   method: 'get',
   path: '/sla/profiles',
-  request: { query: z.object({ tenantId: z.string() }) },
+  request: {},
   responses: {
     200: {
       content: { 'application/json': { schema: z.array(z.object({ id: z.string(), name: z.string(), description: z.string().nullable(), isDefault: z.boolean().nullable(), firstResponseTime: z.number(), resolutionTime: z.number() })) } },
@@ -421,7 +410,6 @@ const createSlaProfileRoute = createRoute({
             firstResponseTime: z.number().min(1),
             resolutionTime: z.number().min(1),
             isDefault: z.boolean().default(false),
-            tenantId: z.string().min(1),
           }),
         },
       },
@@ -440,7 +428,6 @@ const getSlaMetricsRoute = createRoute({
   path: '/sla/metrics',
   request: {
     query: z.object({
-      tenantId: z.string(),
       startDate: z.string().optional(),
       endDate: z.string().optional(),
     }),
@@ -467,7 +454,7 @@ const getSlaMetricsRoute = createRoute({
 const listAgentProfilesRoute = createRoute({
   method: 'get',
   path: '/agents',
-  request: { query: z.object({ tenantId: z.string() }) },
+  request: {},
   responses: {
     200: {
       content: { 'application/json': { schema: z.array(z.object({ id: z.string(), userId: z.string(), isActive: z.boolean().nullable(), maxTickets: z.number().nullable(), currentTickets: z.number().nullable(), isCurrentlyAvailable: z.boolean().nullable() })) } },
@@ -489,7 +476,6 @@ const createAgentProfileRoute = createRoute({
             categories: z.array(z.string()).default([]),
             skills: z.array(z.string()).default([]),
             languages: z.array(z.string()).default(['en']),
-            tenantId: z.string().min(1),
           }),
         },
       },
@@ -506,7 +492,7 @@ const createAgentProfileRoute = createRoute({
 const listAutomationRulesRoute = createRoute({
   method: 'get',
   path: '/automation/rules',
-  request: { query: z.object({ tenantId: z.string() }) },
+  request: {},
   responses: {
     200: {
       content: { 'application/json': { schema: z.array(z.object({ id: z.string(), name: z.string(), description: z.string().nullable(), isActive: z.boolean().nullable(), triggerEvent: z.string(), priority: z.number().nullable() })) } },
@@ -537,7 +523,6 @@ const createAutomationRuleRoute = createRoute({
             })),
             priority: z.number().default(0),
             maxExecutions: z.number().optional(),
-            tenantId: z.string().min(1),
           }),
         },
       },
@@ -556,8 +541,6 @@ const myTicketsRoute = createRoute({
   path: '/my-tickets',
   request: {
     query: z.object({
-      tenantId: z.string(),
-      userId: z.string(),
       status: z.string().optional(),
       limit: z.coerce.number().min(1).max(50).default(20),
       offset: z.coerce.number().min(0).default(0),
@@ -573,16 +556,16 @@ const myTicketsRoute = createRoute({
 export function supportRoutes(ctx: ModuleContext) {
   const app = new OpenAPIHono();
 
-  // Helper imports for direct DB queries (KB, categories, agents, SLA)
-  const { default: supportModule } = { default: null as any };
   const getService = () => ctx.service<ISupportService>('support') as any;
 
   // --- Tickets ---
 
-  app.openapi(listTicketsRoute, async (c) => {
+  app.openapi(
+    { ...listTicketsRoute, middleware: routePerm(ctx, SEED_PERM.ticketsViewAdmin, SEED_PERM.ticketsViewClient) },
+    async (c) => {
     const support = ctx.service<ISupportService>('support');
     const q = c.req.valid('query');
-    const tenantId = c.req.header('x-tenant-id') || q.tenantId || '';
+    const tenantId = c.get('tenantId') as string;
     const result = await support.getTickets(
       {
         status: q.status?.split(','),
@@ -597,13 +580,16 @@ export function supportRoutes(ctx: ModuleContext) {
       q.offset,
     );
     return c.json(result, 200);
-  });
+  },
+  );
 
-  app.openapi(getTicketByNumberRoute, async (c) => {
+  app.openapi(
+    { ...getTicketByNumberRoute, middleware: routePerm(ctx, SEED_PERM.ticketsViewAdmin, SEED_PERM.ticketsViewClient) },
+    async (c) => {
     const support = ctx.service<ISupportService>('support');
     const { ticketNumber } = c.req.valid('param');
     const { includeInternal } = c.req.valid('query');
-    const tenantId = c.req.header('x-tenant-id') || '';
+    const tenantId = c.get('tenantId') as string;
 
     const db = ctx.db as any;
     const { supportTickets: st } = await import('./schema.js');
@@ -620,21 +606,32 @@ export function supportRoutes(ctx: ModuleContext) {
     const result = await support.getTicketWithMessages(ticket.id, tenantId, includeInternal);
     if (!result) return c.json({ error: 'Ticket not found' }, 404);
     return c.json(result, 200);
-  });
+  },
+  );
 
-  app.openapi(getTicketRoute, async (c) => {
+  app.openapi(
+    { ...getTicketRoute, middleware: routePerm(ctx, SEED_PERM.ticketsViewAdmin, SEED_PERM.ticketsViewClient) },
+    async (c) => {
     const support = ctx.service<ISupportService>('support');
     const { id } = c.req.valid('param');
     const { includeInternal } = c.req.valid('query');
-    const tenantId = c.req.header('x-tenant-id') || '';
+    const tenantId = c.get('tenantId') as string;
     const result = await support.getTicketWithMessages(id, tenantId, includeInternal);
     if (!result) return c.json({ error: 'Ticket not found' }, 404);
     return c.json(result, 200);
-  });
+  },
+  );
 
-  app.openapi(createTicketRoute, async (c) => {
+  app.openapi(
+    {
+      ...createTicketRoute,
+      middleware: routePerm(ctx, SEED_PERM.ticketsManage, SEED_PERM.ticketsCreateClient),
+    },
+    async (c) => {
     const support = ctx.service<ISupportService>('support');
     const body = c.req.valid('json');
+    const tenantId = c.get('tenantId') as string;
+    const user = c.get('user') as Panel1AuthUser;
     const ticket = await support.createTicket(
       {
         subject: body.subject,
@@ -647,16 +644,23 @@ export function supportRoutes(ctx: ModuleContext) {
         customFields: body.customFields as Record<string, any>,
         attachments: body.attachments as CreateTicketInput['attachments'],
       },
-      body.tenantId,
-      body.createdById,
+      tenantId,
+      user.id,
     );
     return c.json(ticket, 201);
-  });
+  },
+  );
 
-  app.openapi(addMessageRoute, async (c) => {
+  app.openapi(
+    {
+      ...addMessageRoute,
+      middleware: routePerm(ctx, SEED_PERM.ticketsManage, SEED_PERM.ticketsViewClient),
+    },
+    async (c) => {
     const support = ctx.service<ISupportService>('support');
     const { id } = c.req.valid('param');
     const body = c.req.valid('json');
+    const tenantId = c.get('tenantId') as string;
     try {
       const message = await support.addMessage(
         id,
@@ -671,38 +675,46 @@ export function supportRoutes(ctx: ModuleContext) {
           attachments: body.attachments as AddMessageInput['attachments'],
           timeSpent: body.timeSpent,
         },
-        body.tenantId,
+        tenantId,
       );
       return c.json(message, 201);
     } catch {
       return c.json({ error: 'Ticket not found' }, 404);
     }
-  });
+  },
+  );
 
-  app.openapi(updateTicketStatusRoute, async (c) => {
+  app.openapi(
+    { ...updateTicketStatusRoute, middleware: routePerm(ctx, SEED_PERM.ticketsManage) },
+    async (c) => {
     const support = ctx.service<ISupportService>('support');
     const { id } = c.req.valid('param');
     const body = c.req.valid('json');
+    const tenantId = c.get('tenantId') as string;
+    const user = c.get('user') as Panel1AuthUser;
     try {
-      const ticket = await support.updateTicketStatus(id, body.status, body.tenantId, body.userId, body.reason);
+      const ticket = await support.updateTicketStatus(id, body.status, tenantId, user.id, body.reason);
       return c.json(ticket, 200);
     } catch {
       return c.json({ error: 'Ticket not found' }, 404);
     }
-  });
+  },
+  );
 
-  app.openapi(assignTicketRoute, async (c) => {
+  app.openapi({ ...assignTicketRoute, middleware: routePerm(ctx, SEED_PERM.ticketsManage) }, async (c) => {
     const support = ctx.service<ISupportService>('support');
     const { id } = c.req.valid('param');
-    const body = c.req.valid('json');
-    const agentId = await support.assignTicket(id, body.tenantId);
+    const tenantId = c.get('tenantId') as string;
+    const agentId = await support.assignTicket(id, tenantId);
     return c.json({ agentId }, 200);
   });
 
   // --- Categories ---
 
-  app.openapi(listCategoriesRoute, async (c) => {
-    const { tenantId } = c.req.valid('query');
+  app.openapi(
+    { ...listCategoriesRoute, middleware: routePerm(ctx, SEED_PERM.supportView) },
+    async (c) => {
+    const tenantId = c.get('tenantId') as string;
     const db = ctx.db as any;
     const { supportCategories: sc } = await import('./schema.js');
     const { eq, and } = await import('drizzle-orm');
@@ -712,10 +724,14 @@ export function supportRoutes(ctx: ModuleContext) {
       .where(and(eq(sc.tenantId, tenantId), eq(sc.isActive, true)))
       .orderBy(sc.sortOrder, sc.name);
     return c.json(categories, 200);
-  });
+  },
+  );
 
-  app.openapi(createCategoryRoute, async (c) => {
+  app.openapi(
+    { ...createCategoryRoute, middleware: routePerm(ctx, SEED_PERM.ticketsManage) },
+    async (c) => {
     const body = c.req.valid('json');
+    const tenantId = c.get('tenantId') as string;
     const db = ctx.db as any;
     const { supportCategories: sc } = await import('./schema.js');
     const [category] = await db.insert(sc).values({
@@ -726,22 +742,27 @@ export function supportRoutes(ctx: ModuleContext) {
       parentCategoryId: body.parentCategoryId,
       sortOrder: body.sortOrder,
       defaultAssigneeId: body.defaultAssigneeId,
-      tenantId: body.tenantId,
+      tenantId,
     }).returning();
     return c.json(category, 201);
-  });
+  },
+  );
 
   // --- Knowledge Base ---
 
-  app.openapi(listKbArticlesRoute, async (c) => {
+  app.openapi(
+    {
+      ...listKbArticlesRoute,
+      middleware: routePerm(ctx, SEED_PERM.ticketsViewAdmin, SEED_PERM.ticketsViewClient),
+    },
+    async (c) => {
     const q = c.req.valid('query');
-    const tenantId = c.req.header('x-tenant-id') || q.tenantId || '';
+    const tenantId = c.get('tenantId') as string;
     const db = ctx.db as any;
     const { knowledgeBaseArticles: kba } = await import('./schema.js');
     const { eq, and, or, sql, desc, count } = await import('drizzle-orm');
 
-    const conditions: any[] = [eq(kba.status, 'PUBLISHED'), eq(kba.isPublic, true)];
-    if (tenantId) conditions.push(eq(kba.tenantId, tenantId));
+    const conditions: any[] = [eq(kba.status, 'PUBLISHED'), eq(kba.isPublic, true), eq(kba.tenantId, tenantId)];
     if (q.categoryId) conditions.push(eq(kba.categoryId, q.categoryId));
     if (q.search) {
       conditions.push(
@@ -766,42 +787,57 @@ export function supportRoutes(ctx: ModuleContext) {
 
     const [{ total }] = await db.select({ total: count() }).from(kba).where(and(...conditions));
     return c.json({ articles, total, hasMore: q.offset + q.limit < total }, 200);
-  });
+  },
+  );
 
-  app.openapi(getKbArticleRoute, async (c) => {
+  app.openapi(
+    {
+      ...getKbArticleRoute,
+      middleware: routePerm(ctx, SEED_PERM.ticketsViewAdmin, SEED_PERM.ticketsViewClient),
+    },
+    async (c) => {
     const { slug } = c.req.valid('param');
-    const q = c.req.valid('query');
-    const tenantId = c.req.header('x-tenant-id') || q.tenantId || '';
+    const tenantId = c.get('tenantId') as string;
     const db = ctx.db as any;
     const { knowledgeBaseArticles: kba } = await import('./schema.js');
     const { eq, and } = await import('drizzle-orm');
 
-    const conditions: any[] = [eq(kba.slug, slug), eq(kba.status, 'PUBLISHED')];
-    if (tenantId) conditions.push(eq(kba.tenantId, tenantId));
+    const conditions: any[] = [eq(kba.slug, slug), eq(kba.status, 'PUBLISHED'), eq(kba.tenantId, tenantId)];
 
     const [article] = await db.select().from(kba).where(and(...conditions)).limit(1);
     if (!article) return c.json({ error: 'Article not found' }, 404);
 
     await db.update(kba).set({ viewCount: (article.viewCount ?? 0) + 1, updatedAt: new Date() }).where(eq(kba.id, article.id));
     return c.json({ ...article, viewCount: (article.viewCount ?? 0) + 1 }, 200);
-  });
+  },
+  );
 
-  app.openapi(listKbCategoriesRoute, async (c) => {
-    const q = c.req.valid('query');
-    const tenantId = c.req.header('x-tenant-id') || q.tenantId || '';
+  app.openapi(
+    {
+      ...listKbCategoriesRoute,
+      middleware: routePerm(ctx, SEED_PERM.ticketsViewAdmin, SEED_PERM.ticketsViewClient),
+    },
+    async (c) => {
+    const tenantId = c.get('tenantId') as string;
     const db = ctx.db as any;
     const { knowledgeBaseCategories: kbc } = await import('./schema.js');
     const { eq, and } = await import('drizzle-orm');
 
-    const conditions: any[] = [eq(kbc.isPublic, true)];
-    if (tenantId) conditions.push(eq(kbc.tenantId, tenantId));
+    const conditions: any[] = [eq(kbc.isPublic, true), eq(kbc.tenantId, tenantId)];
 
     const categories = await db.select().from(kbc).where(and(...conditions)).orderBy(kbc.sortOrder, kbc.name);
     return c.json(categories, 200);
-  });
+  },
+  );
 
-  app.openapi(searchKbRoute, async (c) => {
+  app.openapi(
+    {
+      ...searchKbRoute,
+      middleware: routePerm(ctx, SEED_PERM.ticketsViewAdmin, SEED_PERM.ticketsViewClient),
+    },
+    async (c) => {
     const { query, limit } = c.req.valid('query');
+    const tenantId = c.get('tenantId') as string;
     const db = ctx.db as any;
     const { knowledgeBaseArticles: kba } = await import('./schema.js');
     const { eq, and, or, sql } = await import('drizzle-orm');
@@ -812,6 +848,7 @@ export function supportRoutes(ctx: ModuleContext) {
       .where(and(
         eq(kba.status, 'PUBLISHED'),
         eq(kba.isPublic, true),
+        eq(kba.tenantId, tenantId),
         or(
           sql`${kba.title} ILIKE ${`%${query}%`}`,
           sql`${kba.content} ILIKE ${`%${query}%`}`,
@@ -819,34 +856,44 @@ export function supportRoutes(ctx: ModuleContext) {
       ))
       .limit(limit);
     return c.json(articles, 200);
-  });
+  },
+  );
 
   // --- Admin: Stats ---
 
-  app.openapi(getStatsRoute, async (c) => {
+  app.openapi(
+    { ...getStatsRoute, middleware: routePerm(ctx, SEED_PERM.supportView) },
+    async (c) => {
     const support = ctx.service<ISupportService>('support');
-    const { tenantId } = c.req.valid('query');
+    const tenantId = c.get('tenantId') as string;
     const stats = await support.getSupportStats(tenantId);
     return c.json(stats, 200);
-  });
+  },
+  );
 
   // --- SLA ---
 
-  app.openapi(listSlaProfilesRoute, async (c) => {
-    const { tenantId } = c.req.valid('query');
+  app.openapi(
+    { ...listSlaProfilesRoute, middleware: routePerm(ctx, SEED_PERM.supportView) },
+    async (c) => {
+    const tenantId = c.get('tenantId') as string;
     const svc = getService();
     const profiles = await svc.slaManager.getSlaProfiles(tenantId);
     return c.json(profiles, 200);
-  });
+  },
+  );
 
-  app.openapi(createSlaProfileRoute, async (c) => {
+  app.openapi(
+    { ...createSlaProfileRoute, middleware: routePerm(ctx, SEED_PERM.ticketsManage) },
+    async (c) => {
     const body = c.req.valid('json');
+    const tenantId = c.get('tenantId') as string;
     const db = ctx.db as any;
     const { supportSlaProfiles: ssp } = await import('./schema.js');
     const { eq } = await import('drizzle-orm');
 
     if (body.isDefault) {
-      await db.update(ssp).set({ isDefault: false }).where(eq(ssp.tenantId, body.tenantId));
+      await db.update(ssp).set({ isDefault: false }).where(eq(ssp.tenantId, tenantId));
     }
 
     const [profile] = await db.insert(ssp).values({
@@ -866,34 +913,45 @@ export function supportRoutes(ctx: ModuleContext) {
         sunday: { start: '10:00', end: '14:00', enabled: false },
       },
       escalationRules: [],
-      tenantId: body.tenantId,
+      tenantId,
     }).returning();
     return c.json(profile, 201);
-  });
+  },
+  );
 
-  app.openapi(getSlaMetricsRoute, async (c) => {
+  app.openapi(
+    { ...getSlaMetricsRoute, middleware: routePerm(ctx, SEED_PERM.supportView) },
+    async (c) => {
     const q = c.req.valid('query');
+    const tenantId = c.get('tenantId') as string;
     const svc = getService();
     const dateRange = q.startDate && q.endDate
       ? { start: new Date(q.startDate), end: new Date(q.endDate) }
       : undefined;
-    const metrics = await svc.slaManager.getSlaMetrics(q.tenantId, dateRange);
+    const metrics = await svc.slaManager.getSlaMetrics(tenantId, dateRange);
     return c.json(metrics, 200);
-  });
+  },
+  );
 
   // --- Agents ---
 
-  app.openapi(listAgentProfilesRoute, async (c) => {
-    const { tenantId } = c.req.valid('query');
+  app.openapi(
+    { ...listAgentProfilesRoute, middleware: routePerm(ctx, SEED_PERM.supportView) },
+    async (c) => {
+    const tenantId = c.get('tenantId') as string;
     const db = ctx.db as any;
     const { supportAgentProfiles: sap } = await import('./schema.js');
     const { eq } = await import('drizzle-orm');
     const agents = await db.select().from(sap).where(eq(sap.tenantId, tenantId)).orderBy(sap.isActive, sap.currentTickets);
     return c.json(agents, 200);
-  });
+  },
+  );
 
-  app.openapi(createAgentProfileRoute, async (c) => {
+  app.openapi(
+    { ...createAgentProfileRoute, middleware: routePerm(ctx, SEED_PERM.ticketsManage) },
+    async (c) => {
     const body = c.req.valid('json');
+    const tenantId = c.get('tenantId') as string;
     const db = ctx.db as any;
     const { supportAgentProfiles: sap } = await import('./schema.js');
     const [profile] = await db.insert(sap).values({
@@ -902,22 +960,29 @@ export function supportRoutes(ctx: ModuleContext) {
       categories: body.categories,
       skills: body.skills,
       languages: body.languages,
-      tenantId: body.tenantId,
+      tenantId,
     }).returning();
     return c.json(profile, 201);
-  });
+  },
+  );
 
   // --- Automation ---
 
-  app.openapi(listAutomationRulesRoute, async (c) => {
-    const { tenantId } = c.req.valid('query');
+  app.openapi(
+    { ...listAutomationRulesRoute, middleware: routePerm(ctx, SEED_PERM.supportView) },
+    async (c) => {
+    const tenantId = c.get('tenantId') as string;
     const svc = getService();
     const rules = await svc.automationEngine.getAutomationRules(tenantId);
     return c.json(rules, 200);
-  });
+  },
+  );
 
-  app.openapi(createAutomationRuleRoute, async (c) => {
+  app.openapi(
+    { ...createAutomationRuleRoute, middleware: routePerm(ctx, SEED_PERM.ticketsManage) },
+    async (c) => {
     const body = c.req.valid('json');
+    const tenantId = c.get('tenantId') as string;
     const svc = getService();
     const rule = await svc.automationEngine.createAutomationRule(
       {
@@ -929,16 +994,24 @@ export function supportRoutes(ctx: ModuleContext) {
         priority: body.priority,
         maxExecutions: body.maxExecutions,
       },
-      body.tenantId,
+      tenantId,
     );
     return c.json(rule, 201);
-  });
+  },
+  );
 
   // --- My Tickets (client portal) ---
 
-  app.openapi(myTicketsRoute, async (c) => {
+  app.openapi(
+    {
+      ...myTicketsRoute,
+      middleware: routePerm(ctx, SEED_PERM.ticketsViewClient, SEED_PERM.ticketsViewAdmin),
+    },
+    async (c) => {
     const support = ctx.service<ISupportService>('support');
     const q = c.req.valid('query');
+    const tenantId = c.get('tenantId') as string;
+    const user = c.get('user') as Panel1AuthUser;
     const db = ctx.db as any;
     const { supportTickets: st } = await import('./schema.js');
     const { eq } = await import('drizzle-orm');
@@ -946,7 +1019,7 @@ export function supportRoutes(ctx: ModuleContext) {
     const [clientTicket] = await db
       .select({ clientId: st.clientId })
       .from(st)
-      .where(eq(st.createdById, q.userId))
+      .where(eq(st.createdById, user.id))
       .limit(1);
 
     if (!clientTicket?.clientId) {
@@ -955,12 +1028,13 @@ export function supportRoutes(ctx: ModuleContext) {
 
     const result = await support.getTickets(
       { clientId: clientTicket.clientId, status: q.status?.split(',') },
-      q.tenantId,
+      tenantId,
       q.limit,
       q.offset,
     );
     return c.json(result, 200);
-  });
+  },
+  );
 
   return app;
 }

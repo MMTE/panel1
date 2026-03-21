@@ -24,14 +24,17 @@ import {
 import { PluginSlot } from '../../lib/plugins';
 import { useAuth } from '../../hooks/useAuth';
 import { trpc } from '../../api/trpc';
-import type { Client, User } from '@panel1/shared-types';
 
 // Define domain types based on the schema
 type DomainStatus = 'active' | 'expired' | 'pending_transfer' | 'pending_renewal' | 'suspended' | 'cancelled';
 
-// Extended client type with user relation
-interface ClientWithUser extends Client {
-  user: User;
+/** Minimal client row for domain filters (tRPC list); replaces removed @panel1/shared-types */
+interface ClientListItem {
+  id: string;
+  user: {
+    firstName: string;
+    lastName: string;
+  };
 }
 
 interface DomainWithClient {
@@ -355,7 +358,7 @@ export function AdminDomains() {
               className="appearance-none bg-white border border-gray-300 rounded-lg px-4 py-2 pr-8 focus:ring-2 focus:ring-purple-500 focus:border-transparent"
             >
               <option value="all">All Clients</option>
-              {(clients || []).map((client: Client) => (
+              {(clients || []).map((client: ClientListItem) => (
                 <option key={client.id} value={client.id}>
                   {client.user.firstName} {client.user.lastName}
                 </option>

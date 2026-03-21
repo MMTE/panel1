@@ -13,6 +13,7 @@ export interface ContextDeps {
   jobScheduler: JobScheduler;
   config: Record<string, unknown>;
   routeCollector: (moduleName: string, app: unknown) => void;
+  requirePermission?: (...permissionIds: string[]) => unknown;
 }
 
 function createLogger(moduleName: string): Logger {
@@ -62,6 +63,7 @@ export function createModuleContext(deps: ContextDeps): ModuleContext {
 
     config: deps.config,
     logger,
+    requirePermission: deps.requirePermission,
   };
 
   return ctx;

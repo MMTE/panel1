@@ -10,6 +10,8 @@ export interface BootOptions {
   modules: ModuleDefinition[];
   db: DbManagerOptions;
   eventBusOptions?: EventBusOptions;
+  /** Host-injected RBAC middleware factory (e.g. from apps/api). */
+  requirePermission?: (...permissionIds: string[]) => unknown;
 }
 
 export interface BootResult {
@@ -63,7 +65,7 @@ export function validateDependencies(modules: ModuleDefinition[]): void {
 }
 
 export async function bootModules(options: BootOptions): Promise<BootResult> {
-  const { modules, db: dbOptions, eventBusOptions } = options;
+  const { modules, db: dbOptions, eventBusOptions, requirePermission } = options;
 
   console.log(`[core] Discovered ${modules.length} module(s): ${modules.map((m) => m.name).join(', ')}`);
 
@@ -107,6 +109,7 @@ export async function bootModules(options: BootOptions): Promise<BootResult> {
       jobScheduler,
       config: moduleConfig,
       routeCollector,
+      requirePermission,
     });
 
     await mod.setup(ctx);

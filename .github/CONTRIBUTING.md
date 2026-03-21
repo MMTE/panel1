@@ -154,9 +154,10 @@ panel1/
 │           ├── components/ # Reusable components
 │           └── api/      # tRPC client
 ├── packages/
-│   ├── shared-types/     # Shared TypeScript types
-│   └── plugin-sdk/       # Plugin development kit
-└── docs/                 # Documentation
+│   ├── core/             # Module loader, defineModule, framework primitives
+│   └── types/            # Framework-only shared types (see ARCHITECTURE.md)
+├── modules/              # Vertical-slice first-party modules
+└── docs/                 # Project docs (roadmap, notes)
 ```
 
 ## 🧪 Testing

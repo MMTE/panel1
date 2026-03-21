@@ -1,6 +1,17 @@
 import { OpenAPIHono, createRoute, z } from '@hono/zod-openapi';
+import type { MiddlewareHandler } from 'hono';
+import type { Panel1AuthUser } from '@panel1/core';
 import type { ModuleContext } from '@panel1/types';
 import type { IAuditService } from './types.js';
+import { SEED_PERM } from './seed-permissions.js';
+
+function routePerm(ctx: ModuleContext, ...ids: string[]): MiddlewareHandler[] {
+  const rp = ctx.requirePermission;
+  if (!rp) {
+    throw new Error('@panel1/mod-audit: host must pass requirePermission via bootModules()');
+  }
+  return [rp(...ids) as MiddlewareHandler];
+}
 
 const AuditLogSchema = z.object({
   id: z.string(),
@@ -87,8 +98,6 @@ const logEventRoute = createRoute({
             actionType: z.string().min(1),
             resourceType: z.string().min(1),
             resourceId: z.string().optional(),
-            tenantId: z.string().min(1),
-            userId: z.string().optional(),
             metadata: z.record(z.unknown()).optional(),
           }),
         },
@@ -118,7 +127,6 @@ const resourceTrailRoute = createRoute({
     }),
     query: z.object({
       limit: z.coerce.number().min(1).max(100).default(20),
-      tenantId: z.string(),
     }),
   },
   responses: {
@@ -138,8 +146,6 @@ const createExportRoute = createRoute({
       content: {
         'application/json': {
           schema: z.object({
-            tenantId: z.string().min(1),
-            requestedBy: z.string().min(1),
             startDate: z.string(),
             endDate: z.string(),
             resourceTypes: z.array(z.string()).optional(),
@@ -179,7 +185,6 @@ const listExportsRoute = createRoute({
   path: '/exports',
   request: {
     query: z.object({
-      tenantId: z.string(),
       limit: z.coerce.number().min(1).max(100).default(20),
       offset: z.coerce.number().min(0).default(0),
     }),
@@ -217,7 +222,6 @@ const getExportStatusRoute = createRoute({
   path: '/exports/{exportId}',
   request: {
     params: z.object({ exportId: z.string() }),
-    query: z.object({ tenantId: z.string() }),
   },
   responses: {
     200: {
@@ -254,9 +258,7 @@ const getExportStatusRoute = createRoute({
 const getFilterOptionsRoute = createRoute({
   method: 'get',
   path: '/filter-options',
-  request: {
-    query: z.object({ tenantId: z.string() }),
-  },
+  request: {},
   responses: {
     200: {
       content: {
@@ -276,15 +278,7 @@ const getFilterOptionsRoute = createRoute({
 const cleanupRoute = createRoute({
   method: 'post',
   path: '/cleanup',
-  request: {
-    body: {
-      content: {
-        'application/json': {
-          schema: z.object({ tenantId: z.string().min(1) }),
-        },
-      },
-    },
-  },
+  request: {},
   responses: {
     200: {
       content: {
@@ -304,11 +298,14 @@ const cleanupRoute = createRoute({
 export function auditRoutes(ctx: ModuleContext) {
   const app = new OpenAPIHono();
 
-  app.openapi(queryLogsRoute, async (c) => {
+  const auditView = routePerm(ctx, SEED_PERM.auditLogsView);
+
+  app.openapi({ ...queryLogsRoute, middleware: auditView }, async (c) => {
     const audit = ctx.service<IAuditService>('audit');
     const q = c.req.valid('query');
+    const tenantId = c.get('tenantId') as string;
     const result = await audit.queryLogs({
-      tenantId: c.req.header('x-tenant-id') || '',
+      tenantId,
       actionTypes: q.actionTypes?.split(','),
       resourceTypes: q.resourceTypes?.split(','),
       resourceId: q.resourceId,
@@ -322,39 +319,44 @@ export function auditRoutes(ctx: ModuleContext) {
     return c.json(result, 200);
   });
 
-  app.openapi(getStatsRoute, async (c) => {
+  app.openapi({ ...getStatsRoute, middleware: auditView }, async (c) => {
     const audit = ctx.service<IAuditService>('audit');
     const { days } = c.req.valid('query');
-    const tenantId = c.req.header('x-tenant-id') || '';
+    const tenantId = c.get('tenantId') as string;
     const stats = await audit.getStats(tenantId, days);
     return c.json(stats, 200);
   });
 
-  app.openapi(logEventRoute, async (c) => {
+  app.openapi({ ...logEventRoute, middleware: auditView }, async (c) => {
     const audit = ctx.service<IAuditService>('audit');
     const body = c.req.valid('json');
+    const tenantId = c.get('tenantId') as string;
+    const user = c.get('user') as Panel1AuthUser;
     const eventId = await audit.logEvent({
       actionType: body.actionType,
       resourceType: body.resourceType,
       resourceId: body.resourceId,
-      tenantId: body.tenantId,
-      userId: body.userId,
+      tenantId,
+      userId: user.id,
       metadata: body.metadata,
     });
     return c.json({ eventId, success: true }, 201);
   });
 
-  app.openapi(resourceTrailRoute, async (c) => {
+  app.openapi({ ...resourceTrailRoute, middleware: auditView }, async (c) => {
     const audit = ctx.service<IAuditService>('audit');
     const { resourceType, resourceId } = c.req.valid('param');
-    const { limit, tenantId } = c.req.valid('query');
+    const { limit } = c.req.valid('query');
+    const tenantId = c.get('tenantId') as string;
     const result = await audit.getResourceAuditTrail(tenantId, resourceType, resourceId, limit);
     return c.json(result, 200);
   });
 
-  app.openapi(createExportRoute, async (c) => {
+  app.openapi({ ...createExportRoute, middleware: auditView }, async (c) => {
     const audit = ctx.service<IAuditService>('audit');
     const body = c.req.valid('json');
+    const tenantId = c.get('tenantId') as string;
+    const user = c.get('user') as Panel1AuthUser;
     const startDate = new Date(body.startDate);
     const endDate = new Date(body.endDate);
 
@@ -367,8 +369,8 @@ export function auditRoutes(ctx: ModuleContext) {
     }
 
     const exportId = await audit.createExportRequest({
-      tenantId: body.tenantId,
-      requestedBy: body.requestedBy,
+      tenantId,
+      requestedBy: user.id,
       startDate,
       endDate,
       resourceTypes: body.resourceTypes,
@@ -381,17 +383,18 @@ export function auditRoutes(ctx: ModuleContext) {
     }, 201);
   });
 
-  app.openapi(listExportsRoute, async (c) => {
+  app.openapi({ ...listExportsRoute, middleware: auditView }, async (c) => {
     const audit = ctx.service<IAuditService>('audit');
-    const { tenantId, limit, offset } = c.req.valid('query');
+    const { limit, offset } = c.req.valid('query');
+    const tenantId = c.get('tenantId') as string;
     const result = await audit.getExports(tenantId, limit, offset);
     return c.json(result, 200);
   });
 
-  app.openapi(getExportStatusRoute, async (c) => {
+  app.openapi({ ...getExportStatusRoute, middleware: auditView }, async (c) => {
     const audit = ctx.service<IAuditService>('audit');
     const { exportId } = c.req.valid('param');
-    const { tenantId } = c.req.valid('query');
+    const tenantId = c.get('tenantId') as string;
     const result = await audit.getExportStatus(exportId, tenantId);
     if (!result) {
       return c.json({ error: 'Export request not found' }, 404);
@@ -399,16 +402,16 @@ export function auditRoutes(ctx: ModuleContext) {
     return c.json(result, 200);
   });
 
-  app.openapi(getFilterOptionsRoute, async (c) => {
+  app.openapi({ ...getFilterOptionsRoute, middleware: auditView }, async (c) => {
     const audit = ctx.service<IAuditService>('audit');
-    const { tenantId } = c.req.valid('query');
+    const tenantId = c.get('tenantId') as string;
     const result = await audit.getFilterOptions(tenantId);
     return c.json(result, 200);
   });
 
-  app.openapi(cleanupRoute, async (c) => {
+  app.openapi({ ...cleanupRoute, middleware: auditView }, async (c) => {
     const audit = ctx.service<IAuditService>('audit');
-    const { tenantId } = c.req.valid('json');
+    const tenantId = c.get('tenantId') as string;
     const deletedCount = await audit.cleanupOldLogs(tenantId);
     return c.json({
       success: true,

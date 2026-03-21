@@ -21,6 +21,7 @@ import { logger } from './lib/logging/Logger';
 import { bootModules, type BootResult } from '@panel1/core';
 import type { ModuleDefinition } from '@panel1/types';
 import { modules as moduleList, getDatabaseUrl } from './config';
+import { apiBearerAuthMiddleware, apiTenantMiddleware, apiRequirePermission } from './hono/security.js';
 
 const app = express();
 const PORT = process.env.API_PORT || 3001;
@@ -68,7 +69,7 @@ app.use(cors({
   },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'X-TRPC', 'x-trpc-source', 'x-tenant-id'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-TRPC', 'x-trpc-source'],
   exposedHeaders: ['set-cookie'],
   maxAge: 600
 }));
@@ -103,9 +104,12 @@ async function bootModularSystem(): Promise<BootResult> {
   const result = await bootModules({
     modules: moduleDefs,
     db: { connectionString: getDatabaseUrl() },
+    requirePermission: apiRequirePermission,
   });
 
   const honoApp = new Hono();
+  honoApp.use('*', apiBearerAuthMiddleware);
+  honoApp.use('*', apiTenantMiddleware);
 
   for (const [moduleName, routes] of result.moduleRoutes) {
     honoApp.route(`/api/${moduleName}`, routes as any);
@@ -113,6 +117,10 @@ async function bootModularSystem(): Promise<BootResult> {
 
   // Mount Hono as Express middleware for /api/* paths
   app.all('/api/*', async (req, res) => {
+    if (req.method === 'OPTIONS') {
+      res.sendStatus(204);
+      return;
+    }
     const url = new URL(req.url, `http://${req.headers.host}`);
     const headers = new Headers();
     for (const [key, value] of Object.entries(req.headers)) {

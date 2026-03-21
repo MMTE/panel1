@@ -328,14 +328,16 @@ async function seedRolePermissions() {
       'admin.support.view',
       'admin.support.tickets.view',
       'admin.support.tickets.manage',
-      'admin.analytics.view'
+      'admin.analytics.view',
+      'admin.audit_logs.view',
     ],
     [Role.SUPPORT_AGENT]: [
       'admin.dashboard.view',
       'admin.clients.view',
       'admin.support.view',
       'admin.support.tickets.view',
-      'admin.support.tickets.manage'
+      'admin.support.tickets.manage',
+      'admin.audit_logs.view',
     ],
     [Role.BILLING_AGENT]: [
       'admin.dashboard.view',

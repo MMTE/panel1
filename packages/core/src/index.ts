@@ -12,3 +12,12 @@ export { DbManager } from './db.js';
 export type { DbManagerOptions } from './db.js';
 export { createModuleContext } from './context.js';
 export type { ContextDeps } from './context.js';
+
+export { createBearerAuthMiddleware } from './middleware/auth.js';
+export type { CreateBearerAuthMiddlewareOptions } from './middleware/auth.js';
+export { createTenantContextMiddleware } from './middleware/tenant.js';
+export type { CreateTenantContextMiddlewareOptions } from './middleware/tenant.js';
+export { createRequirePermissionMiddleware } from './middleware/requirePermission.js';
+export type { CreateRequirePermissionMiddlewareOptions } from './middleware/requirePermission.js';
+export { createPathPrefixSkipPredicate } from './middleware/public.js';
+export type { Panel1AuthUser, Panel1UserPermissionContext } from './middleware/types.js';

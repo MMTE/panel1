@@ -19,8 +19,30 @@ import {
   Award
 } from 'lucide-react';
 import { useAuth } from '../../hooks/useAuth';
-import { marketplaceManager, type MarketplacePlugin } from '../../lib/marketplace/MarketplaceManager';
-import { pluginManager } from '../../lib/plugins';
+
+/** Stub marketplace (old system removed); replace when module UI ships */
+type MarketplacePlugin = {
+  id: string;
+  name: string;
+  description: string;
+  version: string;
+  author: string;
+  category?: string;
+  verified?: boolean;
+  rating?: number;
+  downloads?: number;
+  homepage?: string;
+};
+
+const marketplaceManager = {
+  async fetchPlugins(): Promise<MarketplacePlugin[]> {
+    return [];
+  },
+  getCategories(): string[] {
+    return [];
+  },
+  async installPlugin(_name: string): Promise<void> {},
+};
 
 export function AdminPlugins() {
   const { user, isDemoMode } = useAuth();

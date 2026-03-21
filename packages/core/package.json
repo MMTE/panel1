@@ -17,6 +17,7 @@
   },
   "dependencies": {
     "@panel1/types": "*",
+    "hono": "^4.12.8",
     "bullmq": "^5.15.0",
     "drizzle-orm": "^0.29.3",
     "ioredis": "^5.4.1",

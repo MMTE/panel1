@@ -18,7 +18,8 @@ npm run lint             # All workspaces via turbo
 
 # Test
 npm run test             # All workspaces via turbo
-cd apps/api && npx vitest run          # API tests only
+cd apps/api && npm run test:hono       # Hono security middleware (vitest)
+cd apps/api && npx vitest run          # API tests only (if configured)
 cd apps/web && npx vitest run          # Web tests only
 cd apps/api && npx vitest run src/path/to/file.test.ts  # Single test
 
@@ -48,6 +49,7 @@ docker compose up -d     # PostgreSQL (5432), Redis (6379), MailHog (SMTP 1025, 
 ### Backend (`apps/api/src/`)
 
 - **Entry point**: `index.ts` — Express server with tRPC middleware and service initialization. Will be replaced with Hono.
+- **`hono/`** — Modular `/api/*` stack: Bearer auth + tenant-from-user + RBAC (`security.ts`); `bootModules({ requirePermission })` wires per-route checks in `modules/*`.
 - **`routers/`** — tRPC router files (20 files). Business logic here needs extraction into module services, then rewriting as Hono routes.
 - **`trpc/`** — tRPC setup. Will be removed when migrating to Hono + Zod OpenAPI.
 - **`db/schema/`** — Drizzle ORM schema files (26 files, monolithic barrel). Will be split so each module owns its own `schema.ts`.
@@ -62,13 +64,13 @@ docker compose up -d     # PostgreSQL (5432), Redis (6379), MailHog (SMTP 1025, 
 - **`api/trpc.ts`** — tRPC client. Will be replaced by orval-generated REST client.
 - **`pages/`** — Admin (~20 pages), client portal, store pages. These will move into their respective modules.
 - **`lib/plugins/index.ts`** — Stub file (old plugin system removed). Exports `PluginSlot`, `routeManager`, `pluginManager` as no-ops to keep existing pages compiling.
-- **`lib/marketplace/MarketplaceManager.ts`** — Stub file (old marketplace removed).
+- **`pages/admin/AdminPlugins.tsx`** — Inlined marketplace stub (old marketplace removed).
 
 ### Key Patterns (current, pre-migration)
 
 - **tRPC type sharing**: Web imports `AppRouter` type directly from `apps/api/src/routers/index.ts`. This will be replaced by orval-generated types from OpenAPI.
-- **Auth**: JWT in localStorage, Bearer token header. `createContext()` in `trpc/context.ts` validates sessions.
-- **Permissions**: `requirePermission()` tRPC middleware + `withPermission()` HOC on frontend.
+- **Auth**: JWT in localStorage, Bearer token header. `createContext()` in `trpc/context.ts` validates sessions; modular Hono routes use the same session table via `hono/security.ts`.
+- **Permissions**: `requirePermission()` tRPC middleware + `withPermission()` HOC on frontend; Hono modules use seed-aligned ids via `ctx.requirePermission` (see `modules/*/seed-permissions.ts`, issue 1.2 for canonical names).
 - **Jobs**: BullMQ queues backed by Redis.
 - **Styling**: Tailwind CSS 3.
 
