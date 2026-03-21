@@ -1,17 +1,26 @@
 export { defineModule } from './define.js';
 export { bootModules, topologicalSort, validateDependencies } from './loader.js';
 export { bootModules as createApp } from './loader.js';
-export type { BootOptions, BootResult } from './loader.js';
+export type { BootOptions, BootResult, BootRedisOptions } from './loader.js';
 export { ServiceRegistry } from './services.js';
 export { EventBus } from './events.js';
 export type { EventBusOptions } from './events.js';
 export { FilterChain } from './filters.js';
 export { JobScheduler } from './jobs.js';
-export type { JobEntry } from './jobs.js';
+export type { JobEntry, JobSchedulerOptions } from './jobs.js';
 export { DbManager } from './db.js';
 export type { DbManagerOptions } from './db.js';
 export { createModuleContext } from './context.js';
 export type { ContextDeps } from './context.js';
+
+export * from './errors.js';
+export { Logger, logger } from './logger.js';
+export type { LogContext } from './logger.js';
+export { EmailService } from './email.js';
+export type { EmailConfig, EmailMessage, EmailTemplate } from './email.js';
+export { EncryptionService } from './encryption.js';
+export { RetryManager } from './resilience.js';
+export type { RetryConfig, CircuitBreakerConfig } from './resilience.js';
 
 export { createBearerAuthMiddleware } from './middleware/auth.js';
 export type { CreateBearerAuthMiddlewareOptions } from './middleware/auth.js';

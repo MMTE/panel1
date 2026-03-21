@@ -8,6 +8,11 @@
   "types": "./src/index.ts",
   "exports": {
     ".": "./src/index.ts",
+    "./errors": "./src/errors.ts",
+    "./logger": "./src/logger.ts",
+    "./email": "./src/email.ts",
+    "./encryption": "./src/encryption.ts",
+    "./resilience": "./src/resilience.ts",
     "./*": "./src/*.ts"
   },
   "scripts": {
@@ -17,14 +22,18 @@
   },
   "dependencies": {
     "@panel1/types": "*",
-    "hono": "^4.12.8",
     "bullmq": "^5.15.0",
     "drizzle-orm": "^0.29.3",
+    "hono": "^4.12.8",
     "ioredis": "^5.4.1",
+    "node-cron": "^3.0.3",
+    "nodemailer": "^6.10.1",
     "postgres": "^3.4.3",
     "zod": "^3.22.4"
   },
   "devDependencies": {
+    "@types/node-cron": "^3.0.11",
+    "@types/nodemailer": "^7.0.11",
     "typescript": "^5.5.3",
     "vitest": "^1.1.0"
   }

@@ -20,7 +20,7 @@ import { PluginManager } from './lib/plugins/PluginManager';
 import { logger } from './lib/logging/Logger';
 import { bootModules, type BootResult } from '@panel1/core';
 import type { ModuleDefinition } from '@panel1/types';
-import { modules as moduleList, getDatabaseUrl } from './config';
+import { modules as moduleList, getDatabaseUrl, getRedisOptions } from './config';
 import { apiBearerAuthMiddleware, apiTenantMiddleware, apiRequirePermission } from './hono/security.js';
 
 const app = express();
@@ -104,6 +104,7 @@ async function bootModularSystem(): Promise<BootResult> {
   const result = await bootModules({
     modules: moduleDefs,
     db: { connectionString: getDatabaseUrl() },
+    redis: getRedisOptions(),
     requirePermission: apiRequirePermission,
   });
 
@@ -214,6 +215,8 @@ process.on('SIGTERM', async () => {
   console.log('SIGTERM received, shutting down...');
   if (bootResult) {
     await bootResult.eventBus.emit('app.stopping', { reason: 'SIGTERM' });
+    await bootResult.jobScheduler.stop();
+    await bootResult.eventBus.stop();
     await bootResult.dbManager.close();
   }
   const eventProcessor = EventProcessor.getInstance();
@@ -228,6 +231,8 @@ process.on('SIGINT', async () => {
   console.log('SIGINT received, shutting down...');
   if (bootResult) {
     await bootResult.eventBus.emit('app.stopping', { reason: 'SIGINT' });
+    await bootResult.jobScheduler.stop();
+    await bootResult.eventBus.stop();
     await bootResult.dbManager.close();
   }
   const eventProcessor = EventProcessor.getInstance();

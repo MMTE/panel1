@@ -1,47 +1,74 @@
-import React, { useState } from 'react';
-import { 
-  Shield, 
-  Search, 
-  Filter,
-  Calendar,
+import React, { useMemo, useState } from 'react';
+import {
+  Shield,
+  Search,
   User,
-  Clock,
   AlertCircle,
   CheckCircle,
   XCircle,
   Eye,
+  Activity,
   Download,
-  ChevronDown,
-  Activity
 } from 'lucide-react';
-import { PluginSlot } from '../../lib/plugins';
+import { useQuery } from '@tanstack/react-query';
 import { useAuth } from '../../hooks/useAuth';
-import { trpc } from '../../api/trpc';
+import { auditApi, type AuditLogRow } from '../../api/auditApi';
+
+function dateRangeToIso(range: string): { startDate: string; endDate: string } {
+  const end = new Date();
+  const start = new Date();
+  const days =
+    range === '1d'
+      ? 1
+      : range === '7d'
+        ? 7
+        : range === '30d'
+          ? 30
+          : range === '90d'
+            ? 90
+            : 7;
+  start.setTime(end.getTime() - days * 24 * 60 * 60 * 1000);
+  return { startDate: start.toISOString(), endDate: end.toISOString() };
+}
 
 export function AdminAuditLogs() {
   const { user } = useAuth();
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedAction, setSelectedAction] = useState('all');
-  const [selectedUser, setSelectedUser] = useState('all');
   const [dateRange, setDateRange] = useState('7d');
   const [page, setPage] = useState(1);
+  const limit = 20;
 
-  // tRPC queries
-  const { data: auditLogsData, isLoading: logsLoading } = trpc.audit.getLogs.useQuery({
-    page,
-    limit: 20,
-    action: selectedAction !== 'all' ? selectedAction : undefined,
-    userId: selectedUser !== 'all' ? selectedUser : undefined,
-    search: searchTerm || undefined,
-    dateRange: dateRange as any,
+  const { startDate, endDate } = useMemo(() => dateRangeToIso(dateRange), [dateRange]);
+
+  const { data: auditLogsData, isLoading: logsLoading } = useQuery({
+    queryKey: ['audit', 'logs', page, selectedAction, dateRange],
+    queryFn: () =>
+      auditApi.queryLogs({
+        page,
+        limit,
+        actionTypes: selectedAction === 'all' ? undefined : selectedAction,
+        startDate,
+        endDate,
+      }),
+    enabled: !!user,
   });
 
-  const { data: users } = trpc.users.list.useQuery();
+  const auditLogs: AuditLogRow[] = auditLogsData?.logs || [];
+  const total = auditLogsData?.total ?? 0;
+  const totalPages = Math.max(1, Math.ceil(total / limit));
 
-  // Extract data with fallbacks
-  const auditLogs = auditLogsData?.logs || [];
-  const totalPages = auditLogsData?.totalPages || 1;
-  const totalLogs = auditLogsData?.total || 0;
+  const filteredLogs = useMemo(() => {
+    const q = searchTerm.toLowerCase();
+    if (!q) return auditLogs;
+    return auditLogs.filter(
+      (log) =>
+        log.actionType.toLowerCase().includes(q) ||
+        log.resourceType.toLowerCase().includes(q) ||
+        (log.resourceId && log.resourceId.toLowerCase().includes(q)) ||
+        (log.userId && log.userId.toLowerCase().includes(q)),
+    );
+  }, [auditLogs, searchTerm]);
 
   const getActionColor = (action: string) => {
     switch (action.toLowerCase()) {
@@ -61,114 +88,87 @@ export function AdminAuditLogs() {
   };
 
   const getActionIcon = (action: string) => {
-    switch (action.toLowerCase()) {
-      case 'create':
-        return CheckCircle;
-      case 'update':
-        return Activity;
-      case 'delete':
-        return XCircle;
-      case 'login':
-      case 'logout':
-        return User;
-      default:
-        return AlertCircle;
-    }
+    const a = action.toLowerCase();
+    if (a.includes('create')) return CheckCircle;
+    if (a.includes('update')) return Activity;
+    if (a.includes('delete')) return XCircle;
+    if (a.includes('login') || a.includes('logout')) return User;
+    return AlertCircle;
   };
 
-  const formatDate = (dateString: string) => {
-    return new Date(dateString).toLocaleDateString('en-US', {
+  const formatDate = (dateString: string) =>
+    new Date(dateString).toLocaleDateString('en-US', {
       year: 'numeric',
       month: 'short',
       day: 'numeric',
       hour: '2-digit',
       minute: '2-digit',
-      second: '2-digit'
+      second: '2-digit',
     });
-  };
 
-  const filteredLogs = auditLogs.filter(log => {
-    const matchesSearch = 
-      log.action.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      log.resource.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      log.details?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      log.user?.firstName?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      log.user?.lastName?.toLowerCase().includes(searchTerm.toLowerCase());
-    
-    return matchesSearch;
-  });
+  const detailsPreview = (log: AuditLogRow) => {
+    if (log.metadata && typeof log.metadata === 'object') {
+      try {
+        return JSON.stringify(log.metadata).slice(0, 120);
+      } catch {
+        return '—';
+      }
+    }
+    return '—';
+  };
 
   return (
     <div className="space-y-6">
-      {/* Page Header */}
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-3xl font-bold text-gray-900">Audit Logs</h1>
-          <p className="text-gray-600 mt-1">
-            Monitor system activities and user actions
-          </p>
+          <p className="text-gray-600 mt-1">Monitor system activities and user actions</p>
         </div>
-
-        <div className="flex items-center space-x-3">
-          <PluginSlot 
-            slotId="admin.page.audit.header.actions" 
-            props={{ user, totalLogs }}
-            className="flex items-center space-x-2"
-          />
-          
-          <button className="bg-gradient-to-r from-purple-500 to-pink-500 text-white px-4 py-2 rounded-lg hover:from-purple-600 hover:to-pink-600 transition-all duration-200 flex items-center space-x-2">
-            <Download className="w-4 h-4" />
-            <span>Export</span>
-          </button>
-        </div>
+        <button
+          type="button"
+          className="bg-gradient-to-r from-purple-500 to-pink-500 text-white px-4 py-2 rounded-lg hover:from-purple-600 hover:to-pink-600 transition-all duration-200 flex items-center space-x-2"
+        >
+          <Download className="w-4 h-4" />
+          <span>Export</span>
+        </button>
       </div>
 
-      {/* Stats Cards */}
       <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
         <div className="bg-white rounded-xl border border-gray-200 p-6">
           <div className="flex items-center justify-between">
             <div>
               <p className="text-gray-600">Total Logs</p>
-              <p className="text-2xl font-bold text-gray-900 mt-1">{totalLogs.toLocaleString()}</p>
+              <p className="text-2xl font-bold text-gray-900 mt-1">{total.toLocaleString()}</p>
             </div>
             <Shield className="w-8 h-8 text-purple-500" />
           </div>
         </div>
-
         <div className="bg-white rounded-xl border border-gray-200 p-6">
           <div className="flex items-center justify-between">
             <div>
-              <p className="text-gray-600">Today's Activity</p>
-              <p className="text-2xl font-bold text-gray-900 mt-1">
-                {auditLogs.filter(log => {
-                  const today = new Date();
-                  const logDate = new Date(log.createdAt);
-                  return logDate.toDateString() === today.toDateString();
-                }).length}
-              </p>
+              <p className="text-gray-600">On this page</p>
+              <p className="text-2xl font-bold text-gray-900 mt-1">{filteredLogs.length}</p>
             </div>
             <Activity className="w-8 h-8 text-blue-500" />
           </div>
         </div>
-
         <div className="bg-white rounded-xl border border-gray-200 p-6">
           <div className="flex items-center justify-between">
             <div>
-              <p className="text-gray-600">Unique Users</p>
+              <p className="text-gray-600">Unique users (page)</p>
               <p className="text-2xl font-bold text-gray-900 mt-1">
-                {new Set(auditLogs.map(log => log.userId)).size}
+                {new Set(filteredLogs.map((l) => l.userId).filter(Boolean)).size}
               </p>
             </div>
             <User className="w-8 h-8 text-green-500" />
           </div>
         </div>
-
         <div className="bg-white rounded-xl border border-gray-200 p-6">
           <div className="flex items-center justify-between">
             <div>
-              <p className="text-gray-600">Critical Actions</p>
+              <p className="text-gray-600">Delete actions (page)</p>
               <p className="text-2xl font-bold text-gray-900 mt-1">
-                {auditLogs.filter(log => log.action.toLowerCase() === 'delete').length}
+                {filteredLogs.filter((l) => l.actionType.toLowerCase().includes('delete')).length}
               </p>
             </div>
             <AlertCircle className="w-8 h-8 text-red-500" />
@@ -176,11 +176,9 @@ export function AdminAuditLogs() {
         </div>
       </div>
 
-      {/* Filters and Search */}
       <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
         <div className="flex flex-col md:flex-row md:items-center md:justify-between space-y-4 md:space-y-0">
           <div className="flex flex-col sm:flex-row sm:items-center space-y-3 sm:space-y-0 sm:space-x-4">
-            {/* Search */}
             <div className="relative">
               <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-gray-400" />
               <input
@@ -191,39 +189,27 @@ export function AdminAuditLogs() {
                 className="pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent w-full sm:w-64"
               />
             </div>
-
-            {/* Action Filter */}
             <select
               value={selectedAction}
-              onChange={(e) => setSelectedAction(e.target.value)}
+              onChange={(e) => {
+                setSelectedAction(e.target.value);
+                setPage(1);
+              }}
               className="border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-purple-500 focus:border-transparent"
             >
               <option value="all">All Actions</option>
-              <option value="create">Create</option>
-              <option value="update">Update</option>
-              <option value="delete">Delete</option>
-              <option value="login">Login</option>
-              <option value="logout">Logout</option>
+              <option value="create">create</option>
+              <option value="update">update</option>
+              <option value="delete">delete</option>
+              <option value="login">login</option>
+              <option value="logout">logout</option>
             </select>
-
-            {/* User Filter */}
-            <select
-              value={selectedUser}
-              onChange={(e) => setSelectedUser(e.target.value)}
-              className="border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-purple-500 focus:border-transparent"
-            >
-              <option value="all">All Users</option>
-              {users?.map((user) => (
-                <option key={user.id} value={user.id}>
-                  {user.firstName} {user.lastName}
-                </option>
-              ))}
-            </select>
-
-            {/* Date Range */}
             <select
               value={dateRange}
-              onChange={(e) => setDateRange(e.target.value)}
+              onChange={(e) => {
+                setDateRange(e.target.value);
+                setPage(1);
+              }}
               className="border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-purple-500 focus:border-transparent"
             >
               <option value="1d">Last 24 hours</option>
@@ -232,31 +218,16 @@ export function AdminAuditLogs() {
               <option value="90d">Last 90 days</option>
             </select>
           </div>
-
           <div className="flex items-center space-x-2 text-sm text-gray-500">
             <Activity className="w-4 h-4" />
-            <span>{filteredLogs.length} logs</span>
+            <span>{filteredLogs.length} shown (client filter)</span>
           </div>
         </div>
       </div>
 
-      {/* Audit Logs Table */}
       <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
         {logsLoading ? (
-          <div className="p-6">
-            <div className="space-y-4">
-              {[...Array(10)].map((_, i) => (
-                <div key={i} className="animate-pulse flex items-center space-x-4">
-                  <div className="w-8 h-8 bg-gray-300 rounded-full"></div>
-                  <div className="flex-1">
-                    <div className="h-4 bg-gray-300 rounded w-1/4 mb-2"></div>
-                    <div className="h-3 bg-gray-300 rounded w-3/4"></div>
-                  </div>
-                  <div className="w-20 h-4 bg-gray-300 rounded"></div>
-                </div>
-              ))}
-            </div>
-          </div>
+          <div className="p-6 text-gray-600">Loading audit logs…</div>
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full">
@@ -273,49 +244,45 @@ export function AdminAuditLogs() {
               </thead>
               <tbody className="divide-y divide-gray-200">
                 {filteredLogs.map((log) => {
-                  const ActionIcon = getActionIcon(log.action);
+                  const ActionIcon = getActionIcon(log.actionType);
+                  const actionLabel = log.actionType.split('.').pop() || log.actionType;
                   return (
                     <tr key={log.id} className="hover:bg-gray-50 transition-colors">
                       <td className="py-4 px-6">
                         <div className="flex items-center space-x-3">
                           <ActionIcon className="w-5 h-5 text-gray-500" />
-                          <span className={`px-2 py-1 rounded-full text-xs font-medium ${getActionColor(log.action)}`}>
-                            {log.action}
+                          <span
+                            className={`px-2 py-1 rounded-full text-xs font-medium ${getActionColor(actionLabel)}`}
+                          >
+                            {log.actionType}
                           </span>
                         </div>
                       </td>
                       <td className="py-4 px-6">
-                        <div>
-                          <div className="font-medium text-gray-900">
-                            {log.user ? `${log.user.firstName} ${log.user.lastName}` : 'System'}
-                          </div>
-                          <div className="text-sm text-gray-500">
-                            {log.user?.email || 'system@panel1.com'}
-                          </div>
+                        <div className="font-mono text-sm text-gray-900">
+                          {log.userId ? `${log.userId.slice(0, 8)}…` : 'System'}
                         </div>
                       </td>
                       <td className="py-4 px-6">
-                        <div className="font-medium text-gray-900">{log.resource}</div>
+                        <div className="font-medium text-gray-900">{log.resourceType}</div>
                         {log.resourceId && (
                           <div className="text-sm text-gray-500">ID: {log.resourceId}</div>
                         )}
                       </td>
                       <td className="py-4 px-6">
-                        <div className="text-gray-900 max-w-xs truncate" title={log.details}>
-                          {log.details || 'No additional details'}
+                        <div className="text-gray-900 max-w-xs truncate" title={detailsPreview(log)}>
+                          {detailsPreview(log)}
                         </div>
                       </td>
                       <td className="py-4 px-6">
-                        <div className="text-gray-900 font-mono text-sm">
-                          {log.ipAddress || 'Unknown'}
-                        </div>
+                        <div className="text-gray-900 font-mono text-sm">{log.ipAddress || '—'}</div>
                       </td>
                       <td className="py-4 px-6">
                         <div className="text-gray-900">{formatDate(log.createdAt)}</div>
                       </td>
                       <td className="py-4 px-6">
-                        <div className="flex items-center justify-end space-x-2">
-                          <button className="p-1 rounded-lg hover:bg-gray-100 transition-colors">
+                        <div className="flex items-center justify-end">
+                          <button type="button" className="p-1 rounded-lg hover:bg-gray-100 transition-colors">
                             <Eye className="w-4 h-4 text-gray-600" />
                           </button>
                         </div>
@@ -336,23 +303,24 @@ export function AdminAuditLogs() {
           </div>
         )}
 
-        {/* Pagination */}
         {totalPages > 1 && (
           <div className="bg-gray-50 px-6 py-3 border-t border-gray-200">
             <div className="flex items-center justify-between">
               <div className="text-sm text-gray-700">
-                Showing page {page} of {totalPages}
+                Page {page} of {totalPages} ({total} total)
               </div>
               <div className="flex items-center space-x-2">
                 <button
-                  onClick={() => setPage(Math.max(1, page - 1))}
+                  type="button"
+                  onClick={() => setPage((p) => Math.max(1, p - 1))}
                   disabled={page === 1}
                   className="px-3 py-1 rounded-lg border border-gray-300 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   Previous
                 </button>
                 <button
-                  onClick={() => setPage(Math.min(totalPages, page + 1))}
+                  type="button"
+                  onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
                   disabled={page === totalPages}
                   className="px-3 py-1 rounded-lg border border-gray-300 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
                 >
@@ -363,13 +331,6 @@ export function AdminAuditLogs() {
           </div>
         )}
       </div>
-
-      {/* Plugin Slot: Page Bottom */}
-      <PluginSlot 
-        slotId="admin.page.audit.bottom" 
-        props={{ user, auditLogs: filteredLogs }}
-        className="space-y-6"
-      />
     </div>
   );
-} 
+}

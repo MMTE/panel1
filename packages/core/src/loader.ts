@@ -6,10 +6,19 @@ import { JobScheduler } from './jobs.js';
 import { DbManager, type DbManagerOptions } from './db.js';
 import { createModuleContext } from './context.js';
 
+/** Redis connection for BullMQ-backed EventBus and JobScheduler (optional — falls back to in-process). */
+export interface BootRedisOptions {
+  host: string;
+  port: number;
+  password?: string;
+}
+
 export interface BootOptions {
   modules: ModuleDefinition[];
   db: DbManagerOptions;
   eventBusOptions?: EventBusOptions;
+  /** When set, EventBus and JobScheduler use BullMQ; otherwise in-memory / node-cron. */
+  redis?: BootRedisOptions;
   /** Host-injected RBAC middleware factory (e.g. from apps/api). */
   requirePermission?: (...permissionIds: string[]) => unknown;
 }
@@ -64,8 +73,16 @@ export function validateDependencies(modules: ModuleDefinition[]): void {
   }
 }
 
+function toConnection(redis: BootRedisOptions) {
+  return {
+    host: redis.host,
+    port: redis.port,
+    ...(redis.password ? { password: redis.password } : {}),
+  };
+}
+
 export async function bootModules(options: BootOptions): Promise<BootResult> {
-  const { modules, db: dbOptions, eventBusOptions, requirePermission } = options;
+  const { modules, db: dbOptions, eventBusOptions, requirePermission, redis: redisOpt } = options;
 
   console.log(`[core] Discovered ${modules.length} module(s): ${modules.map((m) => m.name).join(', ')}`);
 
@@ -75,11 +92,20 @@ export async function bootModules(options: BootOptions): Promise<BootResult> {
   const sorted = topologicalSort(modules);
   console.log(`[core] Boot order: ${sorted.map((m) => m.name).join(' -> ')}`);
 
+  const bullmqConnection = redisOpt ? toConnection(redisOpt) : undefined;
+
   const services = new ServiceRegistry();
-  const eventBus = new EventBus(eventBusOptions);
+  const eventBus = new EventBus({
+    ...eventBusOptions,
+    ...(bullmqConnection ? { redis: bullmqConnection } : {}),
+  });
   const filterChain = new FilterChain();
-  const jobScheduler = new JobScheduler();
+  const jobScheduler = new JobScheduler(
+    bullmqConnection ? { redis: bullmqConnection, queueName: 'panel1-module-jobs' } : {}
+  );
   const dbManager = new DbManager(dbOptions);
+
+  await eventBus.start();
   const moduleRoutes = new Map<string, unknown>();
 
   for (const mod of sorted) {
@@ -116,6 +142,8 @@ export async function bootModules(options: BootOptions): Promise<BootResult> {
     console.log(`[core] Module "${mod.name}" v${mod.version} setup complete`);
     await eventBus.emit('module.loaded', { name: mod.name });
   }
+
+  await jobScheduler.start();
 
   console.log(`[core] All ${sorted.length} module(s) booted successfully`);
 

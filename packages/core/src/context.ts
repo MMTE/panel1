@@ -3,6 +3,7 @@ import type { ServiceRegistry } from './services.js';
 import type { EventBus } from './events.js';
 import type { FilterChain } from './filters.js';
 import type { JobScheduler } from './jobs.js';
+import { Logger as CoreLogger } from './logger.js';
 
 export interface ContextDeps {
   moduleName: string;
@@ -16,18 +17,23 @@ export interface ContextDeps {
   requirePermission?: (...permissionIds: string[]) => unknown;
 }
 
-function createLogger(moduleName: string): Logger {
-  const prefix = `[${moduleName}]`;
+function createModuleLogger(moduleName: string): Logger {
+  const core = CoreLogger.getInstance().child({ operation: moduleName });
   return {
-    info: (msg, ...args) => console.log(prefix, msg, ...args),
-    warn: (msg, ...args) => console.warn(prefix, msg, ...args),
-    error: (msg, ...args) => console.error(prefix, msg, ...args),
-    debug: (msg, ...args) => console.debug(prefix, msg, ...args),
+    info: (msg: string, ...args: unknown[]) => core.info(msg, args[0] as Record<string, unknown>),
+    warn: (msg: string, ...args: unknown[]) => core.warn(msg, args[0] as Record<string, unknown>),
+    error: (msg: string, ...args: unknown[]) => {
+      const maybeErr = args.find((a): a is Error => a instanceof Error);
+      const ctx = args.find((a) => a !== maybeErr) as Record<string, unknown> | undefined;
+      if (maybeErr) core.error(msg, ctx, maybeErr);
+      else core.error(msg, ctx);
+    },
+    debug: (msg: string, ...args: unknown[]) => core.debug(msg, args[0] as Record<string, unknown>),
   };
 }
 
 export function createModuleContext(deps: ContextDeps): ModuleContext {
-  const logger = createLogger(deps.moduleName);
+  const logger = createModuleLogger(deps.moduleName);
 
   const ctx: ModuleContext = {
     moduleName: deps.moduleName,

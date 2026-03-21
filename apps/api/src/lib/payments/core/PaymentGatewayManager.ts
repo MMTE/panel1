@@ -3,7 +3,7 @@ type Database = typeof db;
 import { PaymentGateway, PaymentContext, HealthCheckResult } from '../interfaces/PaymentGateway';
 import { paymentGatewayConfigs, PaymentGatewayConfig, payments } from '../../../db/schema';
 import { eq, and, sql, count, sum } from 'drizzle-orm';
-import { encryptionService } from '../security/EncryptionService';
+import { encryptionService } from '../../security/EncryptionService';
 
 /**
  * Payment Gateway Manager
