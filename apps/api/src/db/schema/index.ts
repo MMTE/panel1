@@ -17,7 +17,6 @@ export * from './provisioning';
 export * from './support-tickets';
 export * from './domains';
 export * from './ssl-certificates';
-export * from './audit-logs';
 export * from './catalog';
 export * from './subscription-components';
 export * from './componentProviders';

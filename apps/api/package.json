@@ -24,6 +24,11 @@
     "start": "node dist/index.js"
   },
   "dependencies": {
+    "@hono/node-server": "^1.13.8",
+    "@hono/zod-openapi": "^1.2.2",
+    "@panel1/core": "*",
+    "@panel1/mod-audit": "*",
+    "@panel1/types": "*",
     "@paralleldrive/cuid2": "^2.2.2",
     "@trpc/server": "^10.45.0",
     "@types/nodemailer": "^6.4.17",
@@ -35,6 +40,7 @@
     "drizzle-orm": "^0.29.3",
     "express": "^4.18.2",
     "helmet": "^7.1.0",
+    "hono": "^4.12.8",
     "ioredis": "^5.4.1",
     "jsonwebtoken": "^9.0.2",
     "node-cron": "^3.0.3",

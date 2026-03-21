@@ -10,7 +10,6 @@ import { provisioningRouter } from './provisioning';
 import { supportRouter } from './support';
 import { dashboardRouter } from './dashboard';
 import { permissionsRouter } from './permissions';
-import { auditRouter } from './audit';
 import { analyticsRouter } from './analytics';
 import { paymentGatewaysRouter } from './payment-gateways';
 import { healthRouter } from './health';
@@ -41,7 +40,6 @@ export const appRouter = router({
   domains: domainPlugin?.getRouter() || router({}),
   ssl: sslPlugin?.getRouter() || router({}),
   permissions: permissionsRouter,
-  audit: auditRouter,
   analytics: analyticsRouter,
   paymentGateways: paymentGatewaysRouter,
   health: healthRouter,

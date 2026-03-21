@@ -1,19 +1,16 @@
 import { EventService } from '../events/EventService';
 import { logger } from '../logging/Logger';
-import { AuditService } from '../audit/AuditService';
 import { createClient } from 'redis';
 import { emailService } from '../email/EmailService';
 
 export class CatalogEventHandlers {
   private static instance: CatalogEventHandlers;
   private eventService: EventService;
-  private auditService: AuditService;
   private redisClient: ReturnType<typeof createClient>;
   private readonly CACHE_TTL = 3600; // 1 hour in seconds
 
   private constructor() {
     this.eventService = new EventService();
-    this.auditService = AuditService.getInstance();
     this.initializeRedis();
   }
 
@@ -104,17 +101,7 @@ export class CatalogEventHandlers {
         correlationId: event.metadata?.correlationId
       });
 
-      await this.auditService.logActivity({
-        tenantId: event.metadata?.tenantId || 'system',
-        userId: event.metadata?.userId || 'system',
-        action: 'component.created',
-        resourceType: 'component_definition',
-        resourceId: componentId,
-        details: {
-          componentKey,
-          eventId: event.id
-        }
-      });
+      // TODO: audit logging migrated to @panel1/mod-audit event subscribers
 
       // Invalidate relevant caches
       await this.invalidateCache('components:list');
@@ -152,18 +139,7 @@ export class CatalogEventHandlers {
         correlationId: event.metadata?.correlationId
       });
 
-      await this.auditService.logActivity({
-        tenantId: event.metadata?.tenantId || 'system',
-        userId: event.metadata?.userId || 'system',
-        action: 'component.updated',
-        resourceType: 'component_definition',
-        resourceId: componentId,
-        details: {
-          componentKey,
-          eventId: event.id,
-          changes
-        }
-      });
+      // TODO: audit logging migrated to @panel1/mod-audit event subscribers
 
       // Invalidate relevant caches
       await this.invalidateCache('components:list');
@@ -204,18 +180,7 @@ export class CatalogEventHandlers {
         correlationId: event.metadata?.correlationId
       });
 
-      await this.auditService.logActivity({
-        tenantId: event.metadata?.tenantId || 'system',
-        userId: event.metadata?.userId || 'system',
-        action: 'component.deleted',
-        resourceType: 'component_definition',
-        resourceId: componentId,
-        details: {
-          componentKey,
-          eventId: event.id,
-          usedInProducts
-        }
-      });
+      // TODO: audit logging migrated to @panel1/mod-audit event subscribers
 
       // Invalidate relevant caches
       await this.invalidateCache('components:list');
@@ -256,18 +221,7 @@ export class CatalogEventHandlers {
         correlationId: event.metadata?.correlationId
       });
 
-      await this.auditService.logActivity({
-        tenantId: event.metadata?.tenantId || 'system',
-        userId: event.metadata?.userId || 'system',
-        action: 'product.created',
-        resourceType: 'product',
-        resourceId: productId,
-        details: {
-          name,
-          category,
-          eventId: event.id
-        }
-      });
+      // TODO: audit logging migrated to @panel1/mod-audit event subscribers
 
       // Invalidate relevant caches
       await this.invalidateCache('products:list');
@@ -306,19 +260,7 @@ export class CatalogEventHandlers {
         correlationId: event.metadata?.correlationId
       });
 
-      await this.auditService.logActivity({
-        tenantId: event.metadata?.tenantId || 'system',
-        userId: event.metadata?.userId || 'system',
-        action: 'product.updated',
-        resourceType: 'product',
-        resourceId: productId,
-        details: {
-          name,
-          category,
-          eventId: event.id,
-          changes
-        }
-      });
+      // TODO: audit logging migrated to @panel1/mod-audit event subscribers
 
       // Invalidate relevant caches
       await this.invalidateCache('products:list');
@@ -360,19 +302,7 @@ export class CatalogEventHandlers {
         correlationId: event.metadata?.correlationId
       });
 
-      await this.auditService.logActivity({
-        tenantId: event.metadata?.tenantId || 'system',
-        userId: event.metadata?.userId || 'system',
-        action: 'product.deleted',
-        resourceType: 'product',
-        resourceId: productId,
-        details: {
-          name,
-          category,
-          eventId: event.id,
-          activeSubscriptions
-        }
-      });
+      // TODO: audit logging migrated to @panel1/mod-audit event subscribers
 
       // Invalidate relevant caches
       await this.invalidateCache('products:list');
@@ -414,17 +344,7 @@ export class CatalogEventHandlers {
         correlationId: event.metadata?.correlationId
       });
 
-      await this.auditService.logActivity({
-        tenantId: event.metadata?.tenantId || 'system',
-        userId: event.metadata?.userId || 'system',
-        action: 'provider.registered',
-        resourceType: 'component_provider',
-        resourceId: providerId,
-        details: {
-          providerKey,
-          eventId: event.id
-        }
-      });
+      // TODO: audit logging migrated to @panel1/mod-audit event subscribers
 
       // Invalidate relevant caches
       await this.invalidateCache('providers:list');
@@ -463,18 +383,7 @@ export class CatalogEventHandlers {
         correlationId: event.metadata?.correlationId
       });
 
-      await this.auditService.logActivity({
-        tenantId: event.metadata?.tenantId || 'system',
-        userId: event.metadata?.userId || 'system',
-        action: 'provider.health_check_failed',
-        resourceType: 'component_provider',
-        resourceId: providerId,
-        details: {
-          providerKey,
-          error,
-          eventId: event.id
-        }
-      });
+      // TODO: audit logging migrated to @panel1/mod-audit event subscribers
 
       // Invalidate provider health status cache
       await this.invalidateCache(`provider:health:${providerId}`);

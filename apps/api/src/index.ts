@@ -2,6 +2,7 @@ import express from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
 import { createExpressMiddleware } from '@trpc/server/adapters/express';
+import { Hono } from 'hono';
 import { appRouter } from './routers/index';
 import { createContext } from './trpc/context';
 import { jobProcessor } from './lib/jobs/JobProcessor';
@@ -15,13 +16,11 @@ import { DomainComponentHandler } from './lib/domains/DomainComponentHandler';
 import { SslComponentHandler } from './lib/ssl/SslComponentHandler';
 import { SupportComponentHandler } from './lib/support/SupportComponentHandler';
 import { PaymentEventHandler } from './lib/payments/PaymentEventHandler';
-import dotenv from 'dotenv';
 import { PluginManager } from './lib/plugins/PluginManager';
-import { NotificationPlugin } from './lib/plugins/examples/NotificationPlugin';
 import { logger } from './lib/logging/Logger';
-
-// Load environment variables
-dotenv.config();
+import { bootModules, type BootResult } from '@panel1/core';
+import type { ModuleDefinition } from '@panel1/types';
+import { modules as moduleList, getDatabaseUrl } from './config';
 
 const app = express();
 const PORT = process.env.API_PORT || 3001;
@@ -44,17 +43,15 @@ app.use(helmet({
 app.use(cors({
   origin: (origin, callback) => {
     const allowedOrigins = [
-      'http://localhost:3000',  // Common React dev port
-      'http://localhost:5173',  // Vite default
-      'http://localhost:5174',  // Vite alternate
-      'http://localhost:5175',  // Vite alternate
-      'http://localhost:8000',  // Another common dev port
-      'http://localhost:8080',  // Another common dev port
-      'http://127.0.0.1:5173', // Support for IPv4 loopback
-      'http://127.0.0.1:3000'  // Support for IPv4 loopback
+      'http://localhost:3000',
+      'http://localhost:5173',
+      'http://localhost:5174',
+      'http://localhost:5175',
+      'http://localhost:8000',
+      'http://localhost:8080',
+      'http://127.0.0.1:5173',
+      'http://127.0.0.1:3000'
     ];
-    
-    // Allow all localhost origins in development
     if (process.env.NODE_ENV === 'development') {
       const localhostRegex = /^http:\/\/localhost:\d+$/;
       if (!origin || localhostRegex.test(origin) || allowedOrigins.includes(origin)) {
@@ -62,32 +59,29 @@ app.use(cors({
         return;
       }
     } else {
-      // In production, strictly check against allowedOrigins
       if (!origin || allowedOrigins.includes(origin)) {
         callback(null, true);
         return;
       }
     }
-    
     callback(new Error('Not allowed by CORS'));
   },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'X-TRPC', 'x-trpc-source'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-TRPC', 'x-trpc-source', 'x-tenant-id'],
   exposedHeaders: ['set-cookie'],
-  maxAge: 600 // 10 minutes
+  maxAge: 600
 }));
 
-// Health check endpoint
 app.get('/health', (req, res) => {
-  res.json({ 
-    status: 'ok', 
+  res.json({
+    status: 'ok',
     timestamp: new Date().toISOString(),
     version: process.env.npm_package_version || '0.1.0'
   });
 });
 
-// tRPC middleware
+// tRPC middleware (legacy — will be removed when all routers migrate to Hono)
 app.use(
   '/trpc',
   createExpressMiddleware({
@@ -96,142 +90,127 @@ app.use(
   })
 );
 
-// Initialize all services
+let bootResult: BootResult | null = null;
+
+async function bootModularSystem(): Promise<BootResult> {
+  const moduleDefs: ModuleDefinition[] = [];
+
+  for (const pkgName of moduleList) {
+    const mod = await import(pkgName);
+    moduleDefs.push(mod.default);
+  }
+
+  const result = await bootModules({
+    modules: moduleDefs,
+    db: { connectionString: getDatabaseUrl() },
+  });
+
+  const honoApp = new Hono();
+
+  for (const [moduleName, routes] of result.moduleRoutes) {
+    honoApp.route(`/api/${moduleName}`, routes as any);
+  }
+
+  // Mount Hono as Express middleware for /api/* paths
+  app.all('/api/*', async (req, res) => {
+    const url = new URL(req.url, `http://${req.headers.host}`);
+    const headers = new Headers();
+    for (const [key, value] of Object.entries(req.headers)) {
+      if (value) headers.set(key, Array.isArray(value) ? value.join(', ') : value);
+    }
+
+    let body: BodyInit | undefined;
+    if (req.method !== 'GET' && req.method !== 'HEAD') {
+      const chunks: Buffer[] = [];
+      for await (const chunk of req) {
+        chunks.push(typeof chunk === 'string' ? Buffer.from(chunk) : chunk);
+      }
+      body = Buffer.concat(chunks);
+    }
+
+    const honoReq = new Request(url.toString(), {
+      method: req.method,
+      headers,
+      body,
+    });
+
+    const honoRes = await honoApp.fetch(honoReq);
+    res.status(honoRes.status);
+    honoRes.headers.forEach((value, key) => {
+      res.setHeader(key, value);
+    });
+    const resBody = await honoRes.text();
+    res.send(resBody);
+  });
+
+  console.log(`  Module routes mounted: ${[...result.moduleRoutes.keys()].map(n => `/api/${n}/`).join(', ')}`);
+  return result;
+}
+
 async function initializeServices() {
   try {
-    // Initialize plugin manager first
     const pluginManager = PluginManager.getInstance();
     await pluginManager.initialize();
 
-    // For development, load the notification plugin in-process
-    if (process.env.NODE_ENV === 'development') {
-      try {
-        // Temporarily disable notification plugin
-        /*
-        const notificationPlugin = new NotificationPlugin();
-        await pluginManager.registerPlugin('notification-plugin', notificationPlugin, {
-          config: {
-            enabled: true,
-            channels: {
-              email: {
-                enabled: true,
-                from: process.env.NOTIFICATION_EMAIL_FROM || 'noreply@panel1.dev',
-              },
-              slack: {
-                enabled: process.env.NOTIFICATION_SLACK_ENABLED === 'true',
-                webhookUrl: process.env.NOTIFICATION_SLACK_WEBHOOK_URL || '',
-              },
-              sms: {
-                enabled: process.env.NOTIFICATION_SMS_ENABLED === 'true',
-                apiKey: process.env.NOTIFICATION_SMS_API_KEY || '',
-                from: process.env.NOTIFICATION_SMS_FROM || '',
-              },
-            },
-            templates: {},
-          },
-        });
-
-        await pluginManager.enablePlugin('notification-plugin');
-        logger.info('✅ Notification plugin loaded and enabled in development mode');
-        */
-      } catch (pluginError) {
-        logger.warn('⚠️ Failed to setup notification plugin:', pluginError);
-        // Continue with initialization - don't let plugin failure stop the server
-      }
-    } else {
-      // In production, try to load the compiled plugin
-      try {
-        await pluginManager.installPlugin('notification-plugin', {
-          config: {
-            enabled: true,
-            channels: {
-              email: {
-                enabled: true,
-                from: process.env.NOTIFICATION_EMAIL_FROM || 'noreply@panel1.dev',
-              },
-              slack: {
-                enabled: process.env.NOTIFICATION_SLACK_ENABLED === 'true',
-                webhookUrl: process.env.NOTIFICATION_SLACK_WEBHOOK_URL || '',
-              },
-              sms: {
-                enabled: process.env.NOTIFICATION_SMS_ENABLED === 'true',
-                apiKey: process.env.NOTIFICATION_SMS_API_KEY || '',
-                from: process.env.NOTIFICATION_SMS_FROM || '',
-              },
-            },
-            templates: {},
-          },
-        });
-
-        await pluginManager.enablePlugin('notification-plugin');
-        logger.info('✅ Notification plugin loaded and enabled from filesystem');
-      } catch (pluginError) {
-        logger.warn('⚠️ Failed to load notification plugin from filesystem:', pluginError);
-      }
-    }
-
-    // Initialize email service first (other services may depend on it)
     await initializeEmailService();
-    
-    // Initialize component provider registry
     await componentProviderRegistry.initialize();
-    
-    // Initialize catalog event handlers
+
     const catalogEventHandlers = CatalogEventHandlers.getInstance();
     await catalogEventHandlers.initialize();
-    
-    // Initialize payment event handler
+
     const paymentEventHandler = PaymentEventHandler.getInstance();
     await paymentEventHandler.initialize();
-    
-    // Initialize job processor
+
     await jobProcessor.initialize();
-    
-    // Initialize and start event processor
+
     const eventProcessor = EventProcessor.getInstance();
     await eventProcessor.start();
-    
-    // Initialize ComponentLifecycleService and register handlers
+
     const lifecycleService = ComponentLifecycleService.getInstance();
-    
-    // Register the CpanelPlugin as a handler for 'cpanel' provider
+
     const cpanelPlugin = new CpanelPlugin();
     lifecycleService.registerHandler('cpanel', cpanelPlugin);
-    
-    // Register the DomainComponentHandler for 'domain-manager' provider
+
     const domainHandler = new DomainComponentHandler();
     lifecycleService.registerHandler('domain-manager', domainHandler);
-    
-    // Register the SslComponentHandler for 'ssl-manager' provider
+
     const sslHandler = new SslComponentHandler();
     lifecycleService.registerHandler('ssl-manager', sslHandler);
-    
-    // Register the SupportComponentHandler for 'support-manager' provider
+
     const supportHandler = new SupportComponentHandler();
     lifecycleService.registerHandler('support-manager', supportHandler);
-    
-    // Start the lifecycle service
+
     await lifecycleService.start();
-    
-    console.log('✅ All services initialized successfully');
+
+    console.log('  Legacy services initialized');
   } catch (error) {
-    logger.error('❌ Failed to initialize services:', error);
+    logger.error('Failed to initialize legacy services:', error);
     process.exit(1);
   }
 }
 
-// Start server
 app.listen(PORT, async () => {
-  console.log(`🚀 Panel1 API Server running on http://localhost:${PORT}`);
-  console.log(`📡 tRPC endpoint: http://localhost:${PORT}/trpc`);
-  
-  // Initialize background services
+  console.log(`Panel1 API Server starting on http://localhost:${PORT}`);
+  console.log(`  tRPC endpoint: http://localhost:${PORT}/trpc`);
+
+  try {
+    bootResult = await bootModularSystem();
+    console.log(`  Module system booted (${bootResult.modules.length} modules)`);
+    await bootResult.eventBus.emit('app.started', { timestamp: new Date() });
+  } catch (error) {
+    console.error('Module boot failed:', error);
+  }
+
   await initializeServices();
+  console.log('Panel1 API Server ready');
 });
 
-// Graceful shutdown
 process.on('SIGTERM', async () => {
-  console.log('📥 SIGTERM received, shutting down gracefully...');
+  console.log('SIGTERM received, shutting down...');
+  if (bootResult) {
+    await bootResult.eventBus.emit('app.stopping', { reason: 'SIGTERM' });
+    await bootResult.dbManager.close();
+  }
   const eventProcessor = EventProcessor.getInstance();
   await eventProcessor.stop();
   const lifecycleService = ComponentLifecycleService.getInstance();
@@ -241,7 +220,11 @@ process.on('SIGTERM', async () => {
 });
 
 process.on('SIGINT', async () => {
-  console.log('📥 SIGINT received, shutting down gracefully...');
+  console.log('SIGINT received, shutting down...');
+  if (bootResult) {
+    await bootResult.eventBus.emit('app.stopping', { reason: 'SIGINT' });
+    await bootResult.dbManager.close();
+  }
   const eventProcessor = EventProcessor.getInstance();
   await eventProcessor.stop();
   const lifecycleService = ComponentLifecycleService.getInstance();
