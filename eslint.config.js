@@ -28,13 +28,7 @@ export default tseslint.config(
     },
   },
   {
-    files: ['packages/plugin-sdk/**/*.{ts,tsx}'],
-    rules: {
-      '@typescript-eslint/no-explicit-any': 'off',
-    },
-  },
-  {
-    files: ['**/plugins/**/*.{ts,tsx}'],
+    files: ['**/plugins/**/*.{ts,tsx}', '**/modules/**/*.{ts,tsx}'],
     rules: {
       '@typescript-eslint/no-require-imports': 'off',
     },

@@ -98,10 +98,13 @@ apps/api/prisma/migrations/
 .turbo/
 
 # Redis dump
- dump.rdb
+dump.rdb
 
 # Bolt editor metadata
 .bolt/
 
 # Vite timestamp files
 *.timestamp-*.mjs
+
+# TypeScript build info
+*.tsbuildinfo

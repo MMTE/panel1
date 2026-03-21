@@ -24,6 +24,6 @@
       "@panel1/*": ["./packages/*/src"]
     }
   },
-  "include": ["src"],
+  "include": ["apps", "packages", "modules"],
   "references": [{ "path": "./tsconfig.node.json" }]
 }
