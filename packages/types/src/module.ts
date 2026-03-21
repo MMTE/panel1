@@ -1,6 +1,12 @@
 import type { z, ZodSchema } from 'zod';
 import type { EventMap, EventHandler, FilterHandler } from './events.js';
 
+/** Optional BullMQ overrides for `ctx.job(...)` (issue 1.4). */
+export interface ModuleJobOptions {
+  maxRetries?: number;
+  backoffMs?: number;
+}
+
 export interface ModuleDefinition {
   name: string;
   version: string;
@@ -34,7 +40,7 @@ export interface ModuleContext {
   emit<K extends keyof EventMap>(event: K, payload: EventMap[K]): Promise<void>;
   emit(event: string, payload: unknown): Promise<void>;
 
-  job(name: string, cron: string, handler: () => Promise<void>): void;
+  job(name: string, cron: string, handler: () => Promise<void>, opts?: ModuleJobOptions): void;
 
   config: Record<string, unknown>;
   logger: Logger;

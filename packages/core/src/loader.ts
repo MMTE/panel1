@@ -2,7 +2,7 @@ import type { ModuleDefinition, ModuleContext } from '@panel1/types';
 import { ServiceRegistry } from './services.js';
 import { EventBus, type EventBusOptions } from './events.js';
 import { FilterChain } from './filters.js';
-import { JobScheduler } from './jobs.js';
+import { JobScheduler, type JobSchedulerOptions } from './jobs.js';
 import { DbManager, type DbManagerOptions } from './db.js';
 import { createModuleContext } from './context.js';
 
@@ -17,6 +17,8 @@ export interface BootOptions {
   modules: ModuleDefinition[];
   db: DbManagerOptions;
   eventBusOptions?: EventBusOptions;
+  /** BullMQ job scheduler tuning (merged with `redis` when boot provides Redis). */
+  jobSchedulerOptions?: JobSchedulerOptions;
   /** When set, EventBus and JobScheduler use BullMQ; otherwise in-memory / node-cron. */
   redis?: BootRedisOptions;
   /** Host-injected RBAC middleware factory (e.g. from apps/api). */
@@ -82,7 +84,14 @@ function toConnection(redis: BootRedisOptions) {
 }
 
 export async function bootModules(options: BootOptions): Promise<BootResult> {
-  const { modules, db: dbOptions, eventBusOptions, requirePermission, redis: redisOpt } = options;
+  const {
+    modules,
+    db: dbOptions,
+    eventBusOptions,
+    jobSchedulerOptions,
+    requirePermission,
+    redis: redisOpt,
+  } = options;
 
   console.log(`[core] Discovered ${modules.length} module(s): ${modules.map((m) => m.name).join(', ')}`);
 
@@ -100,9 +109,11 @@ export async function bootModules(options: BootOptions): Promise<BootResult> {
     ...(bullmqConnection ? { redis: bullmqConnection } : {}),
   });
   const filterChain = new FilterChain();
-  const jobScheduler = new JobScheduler(
-    bullmqConnection ? { redis: bullmqConnection, queueName: 'panel1-module-jobs' } : {}
-  );
+  const jobScheduler = new JobScheduler({
+    queueName: 'panel1-module-jobs',
+    ...jobSchedulerOptions,
+    ...(bullmqConnection ? { redis: bullmqConnection } : {}),
+  });
   const dbManager = new DbManager(dbOptions);
 
   await eventBus.start();

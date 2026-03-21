@@ -1,6 +1,7 @@
 export type {
   ModuleDefinition,
   ModuleContext,
+  ModuleJobOptions,
   SetupFunction,
   Logger,
   EmailTransport,

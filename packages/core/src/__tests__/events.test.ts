@@ -56,4 +56,24 @@ describe('EventBus', () => {
     bus.on('x', vi.fn());
     expect(bus.listenerCount('x')).toBe(2);
   });
+
+  it('outbox: insert + markDispatched on success (memory mode)', async () => {
+    const insertPending = vi.fn().mockResolvedValue('out-1');
+    const markDispatched = vi.fn().mockResolvedValue(undefined);
+    const bus2 = new EventBus({
+      outbox: { insertPending, markDispatched, markDead: vi.fn() },
+    });
+    const handler = vi.fn();
+    bus2.on('e', handler);
+    await bus2.emit('e', { n: 1 });
+    expect(insertPending).toHaveBeenCalledWith('e', { n: 1 });
+    expect(markDispatched).toHaveBeenCalledWith('out-1');
+    expect(handler).toHaveBeenCalledWith({ n: 1 });
+  });
+
+  it('getStats in memory mode returns mode only', async () => {
+    const s = await bus.getStats();
+    expect(s.mode).toBe('memory');
+    expect(s.waiting).toBeUndefined();
+  });
 });

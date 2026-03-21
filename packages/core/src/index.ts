@@ -4,7 +4,7 @@ export { bootModules as createApp } from './loader.js';
 export type { BootOptions, BootResult, BootRedisOptions } from './loader.js';
 export { ServiceRegistry } from './services.js';
 export { EventBus } from './events.js';
-export type { EventBusOptions } from './events.js';
+export type { EventBusOptions, EventBusBullmqOptions, EventOutboxPort } from './events.js';
 export { FilterChain } from './filters.js';
 export { JobScheduler } from './jobs.js';
 export type { JobEntry, JobSchedulerOptions } from './jobs.js';

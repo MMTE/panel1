@@ -21,3 +21,4 @@ export * from './catalog';
 export * from './subscription-components';
 export * from './componentProviders';
 export * from './plugins';
+export * from './event-outbox';

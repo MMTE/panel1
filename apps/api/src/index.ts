@@ -21,6 +21,8 @@ import { logger } from './lib/logging/Logger';
 import { bootModules, type BootResult } from '@panel1/core';
 import type { ModuleDefinition } from '@panel1/types';
 import { modules as moduleList, getDatabaseUrl, getRedisOptions } from './config';
+import { db } from './db';
+import { createEventOutboxHooks } from './lib/core/eventOutbox.js';
 import { apiBearerAuthMiddleware, apiTenantMiddleware, apiRequirePermission } from './hono/security.js';
 
 const app = express();
@@ -106,6 +108,9 @@ async function bootModularSystem(): Promise<BootResult> {
     db: { connectionString: getDatabaseUrl() },
     redis: getRedisOptions(),
     requirePermission: apiRequirePermission,
+    eventBusOptions: {
+      outbox: createEventOutboxHooks(db),
+    },
   });
 
   const honoApp = new Hono();

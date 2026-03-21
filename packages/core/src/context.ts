@@ -1,4 +1,4 @@
-import type { ModuleContext, Logger } from '@panel1/types';
+import type { ModuleContext, Logger, ModuleJobOptions } from '@panel1/types';
 import type { ServiceRegistry } from './services.js';
 import type { EventBus } from './events.js';
 import type { FilterChain } from './filters.js';
@@ -63,8 +63,8 @@ export function createModuleContext(deps: ContextDeps): ModuleContext {
       await deps.eventBus.emit(event, payload);
     },
 
-    job(name: string, cron: string, handler: () => Promise<void>): void {
-      deps.jobScheduler.register(name, cron, handler, deps.moduleName);
+    job(name: string, cron: string, handler: () => Promise<void>, opts?: ModuleJobOptions): void {
+      deps.jobScheduler.register(name, cron, handler, deps.moduleName, opts);
     },
 
     config: deps.config,

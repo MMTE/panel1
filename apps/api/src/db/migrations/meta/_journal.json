@@ -29,6 +29,13 @@
       "when": 1709913900000,
       "tag": "0003_add_roles_permissions",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "5",
+      "when": 1740000000000,
+      "tag": "0004_event_outbox",
+      "breakpoints": true
     }
   ]
 }
