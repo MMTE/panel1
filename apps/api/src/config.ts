@@ -3,6 +3,7 @@ loadEnv();
 
 export const modules = [
   '@panel1/mod-audit',
+  '@panel1/mod-support',
 ];
 
 export function getDatabaseUrl(): string {

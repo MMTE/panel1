@@ -7,4 +7,3 @@ export * from '../lib/catalog/types';
 export * from '../lib/plugins/types';
 export * from '../lib/provisioning/types';
 export * from '../lib/subscription/types';
-export * from '../lib/support/types'; 

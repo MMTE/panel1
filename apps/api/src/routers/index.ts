@@ -7,7 +7,7 @@ import { invoicesRouter } from './invoices';
 import { tenantsRouter } from './tenants';
 import { subscriptionsRouter } from './subscriptions';
 import { provisioningRouter } from './provisioning';
-import { supportRouter } from './support';
+
 import { dashboardRouter } from './dashboard';
 import { permissionsRouter } from './permissions';
 import { analyticsRouter } from './analytics';
@@ -35,7 +35,7 @@ export const appRouter = router({
   tenants: tenantsRouter,
   subscriptions: subscriptionsRouter,
   provisioning: provisioningRouter,
-  support: supportRouter,
+
   dashboard: dashboardRouter,
   domains: domainPlugin?.getRouter() || router({}),
   ssl: sslPlugin?.getRouter() || router({}),

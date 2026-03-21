@@ -14,7 +14,7 @@ import { ComponentLifecycleService } from './lib/components/ComponentLifecycleSe
 import { CpanelPlugin } from './lib/provisioning/plugins/CpanelPlugin';
 import { DomainComponentHandler } from './lib/domains/DomainComponentHandler';
 import { SslComponentHandler } from './lib/ssl/SslComponentHandler';
-import { SupportComponentHandler } from './lib/support/SupportComponentHandler';
+
 import { PaymentEventHandler } from './lib/payments/PaymentEventHandler';
 import { PluginManager } from './lib/plugins/PluginManager';
 import { logger } from './lib/logging/Logger';
@@ -176,9 +176,6 @@ async function initializeServices() {
 
     const sslHandler = new SslComponentHandler();
     lifecycleService.registerHandler('ssl-manager', sslHandler);
-
-    const supportHandler = new SupportComponentHandler();
-    lifecycleService.registerHandler('support-manager', supportHandler);
 
     await lifecycleService.start();
 

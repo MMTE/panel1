@@ -15,15 +15,16 @@ This document defines the target architecture for Panel1. It is the authoritativ
 5. [Module Contract](#module-contract)
 6. [Module Context](#module-context)
 7. [Inter-Module Communication](#inter-module-communication)
-8. [Extension Interfaces](#extension-interfaces)
-9. [Event System](#event-system)
-10. [Database & Schema Ownership](#database--schema-ownership)
-11. [API Layer](#api-layer)
-12. [Frontend Architecture](#frontend-architecture)
-13. [Core Package](#core-package)
-14. [Configuration](#configuration)
-15. [Microservices Path](#microservices-path)
-16. [Influences & Prior Art](#influences--prior-art)
+8. [Type Ownership](#type-ownership)
+9. [Extension Interfaces](#extension-interfaces)
+10. [Event System](#event-system)
+11. [Database & Schema Ownership](#database--schema-ownership)
+12. [API Layer](#api-layer)
+13. [Frontend Architecture](#frontend-architecture)
+14. [Core Package](#core-package)
+15. [Configuration](#configuration)
+16. [Microservices Path](#microservices-path)
+17. [Influences & Prior Art](#influences--prior-art)
 
 ---
 
@@ -109,25 +110,21 @@ panel1/
 │   │       ├── db.ts               # Database connection, migration runner
 │   │       └── types.ts            # ModuleDefinition, ModuleContext types
 │   │
-│   └── types/                      # @panel1/types — shared contracts
+│   └── types/                      # @panel1/types — framework contracts only
 │       └── src/
-│           ├── events.ts           # Event name + payload type map
-│           ├── services/           # Service interface contracts
-│           │   ├── billing.ts      # IBillingService
-│           │   ├── subscriptions.ts
-│           │   ├── provisioning.ts
-│           │   └── ...
-│           ├── extensions/         # Standardized extension interfaces
-│           │   ├── gateway.ts      # IPaymentGateway
-│           │   ├── provisioner.ts  # IProvisioner
-│           │   └── registrar.ts    # IRegistrar
-│           └── ui.ts               # Page/nav/slot registration types
+│           ├── module.ts           # ModuleDefinition, ModuleContext, SetupFunction
+│           ├── events.ts           # EventHandler, FilterHandler, base EventMap (core events only)
+│           ├── extensions.ts       # IPaymentGateway, IProvisioner, IRegistrar
+│           ├── ui.ts               # PageRegistration, NavItem, WidgetSlot types
+│           ├── common.ts           # Money, PaginatedResult, SortOrder, DateRange
+│           └── index.ts            # Barrel export
 │
 ├── modules/                        # First-party business modules
 │   ├── catalog/
 │   │   ├── package.json            # "@panel1/mod-catalog"
 │   │   └── src/
 │   │       ├── index.ts            # Module definition (setup + schema + config)
+│   │       ├── types.ts            # ICatalogService, DTOs, event payloads (public API)
 │   │       ├── schema.ts           # Drizzle tables owned by this module
 │   │       ├── service.ts          # CatalogService implements ICatalogService
 │   │       ├── routes.ts           # Hono sub-app
@@ -157,7 +154,7 @@ panel1/
 | Directory | Purpose | Who writes it |
 |-----------|---------|---------------|
 | `packages/core` | Framework: module loading, events, services, DB | Core team only |
-| `packages/types` | Shared interfaces and event types | Core team, modules reference |
+| `packages/types` | Framework contracts: extension interfaces, core event types, UI types, common primitives. Does NOT contain module service interfaces — those live in each module's `types.ts`. | Core team only |
 | `modules/*` | First-party business logic | Core team |
 | `plugins/*` | Third-party extensions | Anyone |
 | `apps/api` | HTTP shell (Hono + core bootstrap) | Core team only |
@@ -348,10 +345,11 @@ interface ModuleContext {
 ```
 Module A ──service call──▶ Module B's public service (IBillingService)     ✅
 Module A ──event──────────▶ Event Bus ──────▶ Module B's subscriber        ✅
+Module A ──import type────▶ Module B's types.ts (type-only, no runtime)    ✅
 Module A ──import──────────▶ Module B's schema/DB/internal code            ❌
 ```
 
-Modules interact through **service interfaces** and **events**, never through direct database access or internal imports.
+Modules interact through **service interfaces** and **events**, never through direct database access or internal imports. Cross-module type imports must be `import type` only — the runtime boundary is the service registry.
 
 ---
 
@@ -363,11 +361,13 @@ For when Module A needs data from Module B right now:
 
 ```typescript
 // Inside billing module's service
+import type { ISubscriptionService } from '@panel1/mod-subscriptions/types';
+
 const subService = this.ctx.service<ISubscriptionService>('subscriptions');
 const subscription = await subService.getById(subscriptionId);
 ```
 
-The service registry resolves the implementation at runtime. Today it's an in-process call. The interface stays the same if it becomes a network call later.
+The service interface is imported **type-only** from the module that owns it (no runtime dependency). The service registry resolves the implementation at runtime. Today it's an in-process call. The interface stays the same if it becomes a network call later.
 
 ### Asynchronous: Events
 
@@ -418,9 +418,142 @@ Filters run synchronously in priority order. They can modify the payload or thro
 
 ---
 
+## Type Ownership
+
+### The Problem with Central Types
+
+A single `@panel1/types` package containing every module's service interfaces and event payloads becomes a bottleneck god-package. The billing team can't add `invoice.voided` without editing a package they don't own. Plugin authors can't extend the event map or register new service interfaces. Every module transitively depends on every other module's types.
+
+### The Rule: Modules Own Their Types
+
+`@panel1/types` contains **only framework-level contracts** — things that rarely change and are defined by the platform, not by individual modules:
+
+| Lives in `@panel1/types` | Lives in the module's `types.ts` |
+|--------------------------|----------------------------------|
+| `ModuleDefinition`, `ModuleContext` | `IBillingService`, `ICatalogService` |
+| `IPaymentGateway`, `IProvisioner`, `IRegistrar` | Module-specific DTOs and input types |
+| `EventHandler`, `FilterHandler` | Module event payload types |
+| `PageRegistration`, `NavItem`, `WidgetSlot` | — |
+| `Money`, `PaginatedResult`, `DateRange` | — |
+| Core events (`app.started`, `module.loaded`) | Module events (`invoice.created`, `payment.succeeded`) |
+
+### Module Public Types
+
+Each module exports its public surface from `types.ts`. This is the only file other modules may import from:
+
+```typescript
+// modules/billing/src/types.ts — the public contract
+
+export interface IBillingService {
+  createInvoice(input: CreateInvoiceInput): Promise<Invoice>;
+  getInvoice(id: string): Promise<Invoice | null>;
+  listInvoices(clientId: string): Promise<Invoice[]>;
+  markPaid(invoiceId: string, paymentId: string): Promise<void>;
+}
+
+export interface CreateInvoiceInput {
+  clientId: string;
+  items: InvoiceItemInput[];
+  dueDate?: Date;
+}
+
+export interface Invoice {
+  id: string;
+  clientId: string;
+  status: 'draft' | 'sent' | 'paid' | 'overdue' | 'cancelled';
+  total: number;
+  currency: string;
+}
+```
+
+Other modules consume it by importing from the module package:
+
+```typescript
+// In modules/subscriptions/src/service.ts
+import type { IBillingService } from '@panel1/mod-billing/types';
+
+const billing = this.ctx.service<IBillingService>('billing');
+const invoice = await billing.createInvoice({ clientId, items });
+```
+
+The billing module owns its interface. Adding a method or changing a return type is a change to the billing module, not to a shared package.
+
+### Type-Safe Events via Declaration Merging
+
+Instead of one giant `EventMap` in the types package, the framework provides a base interface that modules augment using TypeScript declaration merging:
+
+```typescript
+// In @panel1/types/events.ts — framework provides the base
+export interface EventMap {
+  'app.started':    { timestamp: Date };
+  'app.stopping':   { reason: string };
+  'module.loaded':  { name: string };
+  'module.unloaded': { name: string };
+}
+```
+
+Each module extends it in its own `types.ts`:
+
+```typescript
+// In modules/billing/src/types.ts
+declare module '@panel1/types' {
+  interface EventMap {
+    'invoice.created':   { invoiceId: string; clientId: string; total: number };
+    'invoice.paid':      { invoiceId: string; paymentId: string; amount: number };
+    'invoice.overdue':   { invoiceId: string; dueDate: Date };
+    'invoice.cancelled': { invoiceId: string; reason?: string };
+    'invoice.refunded':  { invoiceId: string; refundAmount: number };
+  }
+}
+```
+
+Plugins do the same:
+
+```typescript
+// In plugins/cpanel-provisioner/src/types.ts
+declare module '@panel1/types' {
+  interface EventMap {
+    'cpanel.account.created':    { username: string; domain: string };
+    'cpanel.backup.completed':   { accountId: string; size: number };
+  }
+}
+```
+
+Now `ctx.emit('invoice.created', payload)` and `ctx.on('invoice.created', handler)` are fully type-checked — but no one edited a central file. TypeScript merges the declarations at compile time.
+
+### Dependency Rules
+
+```
+@panel1/types       ← depends on nothing (pure type declarations)
+@panel1/core        ← depends on @panel1/types
+modules/*           ← depend on @panel1/types + @panel1/core
+                       may import type-only from another module's types.ts
+plugins/*           ← depend on @panel1/types + @panel1/core
+                       may import type-only from a module's types.ts
+```
+
+The key constraint: cross-module type imports are **type-only** (`import type { ... }`). No runtime imports between modules — only service calls and events.
+
+### Plugin Developer Experience
+
+A plugin author's dependencies are minimal:
+
+```
+plugin-stripe/
+├── package.json        # depends on: @panel1/types, @panel1/core
+└── src/
+    ├── index.ts        # defineModule({ ... })
+    ├── types.ts        # declaration merging for custom events
+    └── gateway.ts      # implements IPaymentGateway from @panel1/types
+```
+
+They import `IPaymentGateway` from `@panel1/types` — a stable, small contract. They never need to touch billing, subscription, or support types unless they explicitly choose to consume those modules' services.
+
+---
+
 ## Extension Interfaces
 
-Standardized interfaces for each integration type. These are the contracts that third-party developers implement.
+Standardized interfaces for each integration type. These live in `@panel1/types/extensions` and are the stable contracts that third-party developers implement.
 
 ### IProvisioner (Server Modules)
 
@@ -501,16 +634,16 @@ Events are persisted to the database before being dispatched to the queue. This 
 
 ### Event Catalog
 
-Each module declares its `emits` array. The combined catalog serves as documentation and can be used for validation (warn if a module subscribes to an event no module emits).
+Each module declares its `emits` array in `defineModule()` and its typed event payloads via declaration merging on the `EventMap` interface (see [Type Ownership](#type-ownership)). The combined catalog serves as documentation and can be used for validation (warn if a module subscribes to an event no module emits).
 
-Core events (emitted by the platform):
+Core events (emitted by the platform, defined in `@panel1/types`):
 
 ```
 module.loaded        module.unloaded
 app.started          app.stopping
 ```
 
-Module events follow the pattern `{domain}.{action}`:
+Module events follow the pattern `{domain}.{action}` and are typed via declaration merging in each module's `types.ts`:
 
 ```
 subscription.created     subscription.activated    subscription.renewed
@@ -525,6 +658,8 @@ client.created           client.updated            client.suspended
 user.registered          user.login
 support.ticket.created   support.ticket.replied    support.ticket.resolved
 ```
+
+Plugins can emit their own events using the same pattern — they augment `EventMap` via declaration merging and declare their events in `emits`. No central file needs to be edited.
 
 ---
 
@@ -597,6 +732,7 @@ export function billingRoutes(ctx: ModuleContext) {
   });
 
   app.openapi(listInvoices, async (c) => {
+    // IBillingService imported type-only from @panel1/mod-billing/types
     const invoices = await ctx.service<IBillingService>('billing').list();
     return c.json(invoices);
   });

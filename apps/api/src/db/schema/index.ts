@@ -14,7 +14,7 @@ export * from './scheduled-jobs';
 export * from './dunning-attempts';
 export * from './subscription-state-changes';
 export * from './provisioning';
-export * from './support-tickets';
+
 export * from './domains';
 export * from './ssl-certificates';
 export * from './catalog';
@@ -32,7 +32,7 @@ import * as planSchema from './plans';
 import * as provisioningSchema from './provisioning';
 import * as roleSchema from './roles';
 import * as subscriptionSchema from './subscriptions';
-import * as supportSchema from './support-tickets';
+
 import * as tenantSchema from './tenants';
 import * as userSchema from './users';
 
@@ -49,7 +49,7 @@ export const db = drizzle(client, {
     ...provisioningSchema,
     ...roleSchema,
     ...subscriptionSchema,
-    ...supportSchema,
+
     ...tenantSchema,
     ...userSchema,
   },
