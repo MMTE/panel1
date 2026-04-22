@@ -1,18 +1,17 @@
+import type { EventBus } from '@panel1/core';
 import { EventService } from '../events/EventService';
 import { Logger } from '../logging/Logger';
 import { db } from '../../db';
 import { invoices, subscriptions, plans } from '../../db/schema';
 import { eq, and } from 'drizzle-orm';
-import { EventProcessor } from '../../lib/jobs/processors/EventProcessor';
 
 /**
- * Payment Event Handler for processing payment-related events
+ * Payment Event Handler for processing payment-related events (subscribes to core EventBus).
  */
 export class PaymentEventHandler {
   private static instance: PaymentEventHandler;
   private logger = Logger.getInstance();
   private eventService = EventService.getInstance();
-  private eventProcessor = EventProcessor.getInstance();
 
   private constructor() {}
 
@@ -23,17 +22,16 @@ export class PaymentEventHandler {
     return PaymentEventHandler.instance;
   }
 
-  /**
-   * Initialize the payment event handler and register listeners
-   */
-  async initialize(): Promise<void> {
-    this.logger.info('🎧 Initializing Payment Event Handler...');
-
-    // Register event handlers with the EventProcessor
-    this.eventProcessor.registerHandler('payment.succeeded', this.handlePaymentSucceeded.bind(this));
-    this.eventProcessor.registerHandler('payment.failed', this.handlePaymentFailed.bind(this));
-
-    this.logger.info('✅ Payment Event Handler initialized');
+  /** Called from `legacyBridge` — registers on `@panel1/core` EventBus (replaces legacy EventProcessor). */
+  async attachToEventBus(bus: EventBus): Promise<void> {
+    this.logger.info('🎧 Attaching PaymentEventHandler to core EventBus...');
+    bus.on('payment.succeeded', async (payload: unknown) => {
+      await this.handlePaymentSucceeded(payload as any);
+    });
+    bus.on('payment.failed', async (payload: unknown) => {
+      await this.handlePaymentFailed(payload as any);
+    });
+    this.logger.info('✅ Payment Event Handler attached');
   }
 
   /**

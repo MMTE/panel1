@@ -4,7 +4,7 @@ import crypto from 'crypto';
 import { db } from '../db/index.js';
 import { users, sessions, permissions, rolePermissions, type User, type NewUser, type NewSession } from '../db/schema/users.js';
 import { eq, and, gte, lt } from 'drizzle-orm';
-import { PermissionManager } from './auth/PermissionManager.js';
+import { permissionManager } from './auth/PermissionManager.js';
 
 const JWT_SECRET = process.env.JWT_SECRET || 'your-super-secret-jwt-key';
 const JWT_EXPIRES_IN = '7d';
@@ -143,7 +143,6 @@ export async function cleanupExpiredSessions(): Promise<void> {
  */
 async function loadUserPermissions(role: string): Promise<string[]> {
   try {
-    const permissionManager = PermissionManager.getInstance();
     return await permissionManager.getRolePermissions(role as any);
   } catch (error) {
     console.error('Failed to load user permissions:', error);

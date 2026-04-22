@@ -1,10 +1,44 @@
+import { mkdir, writeFile, unlink } from 'node:fs/promises';
+import path from 'node:path';
 import type { ModuleContext } from '@panel1/types';
 import type {
   IAuditService, AuditEvent, AuditQuery, AuditQueryResult, AuditStats,
   AuditExportRequest, AuditExportDetail, AuditExportsResult, AuditFilterOptions,
 } from './types.js';
 import { auditLogs, auditLogRetentionPolicies, auditLogExports } from './schema.js';
-import { eq, and, gte, lte, desc, asc, count, sql, inArray } from 'drizzle-orm';
+import { eq, and, gte, lte, desc, asc, count, sql, inArray, lt, isNotNull } from 'drizzle-orm';
+
+const EXPORT_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+
+function exportDiskPath(tenantId: string, exportId: string, format: string): string {
+  const base = process.env.AUDIT_EXPORT_DIR || path.join(process.cwd(), 'data', 'audit-exports');
+  const ext = format === 'csv' ? 'csv' : 'json';
+  return path.join(base, tenantId, `${exportId}.${ext}`);
+}
+
+function escapeCsvCell(value: unknown): string {
+  if (value === null || value === undefined) return '';
+  const s = typeof value === 'object' ? JSON.stringify(value) : String(value);
+  if (/[",\n\r]/.test(s)) return `"${s.replace(/"/g, '""')}"`;
+  return s;
+}
+
+function logsToCsv(logs: { id: string; actionType: string; resourceType: string; resourceId: string | null; userId: string | null; createdAt: Date; metadata: unknown }[]): string {
+  const header = ['id', 'actionType', 'resourceType', 'resourceId', 'userId', 'createdAt', 'metadata'];
+  const lines = [header.join(',')];
+  for (const row of logs) {
+    lines.push([
+      escapeCsvCell(row.id),
+      escapeCsvCell(row.actionType),
+      escapeCsvCell(row.resourceType),
+      escapeCsvCell(row.resourceId),
+      escapeCsvCell(row.userId),
+      escapeCsvCell(row.createdAt?.toISOString?.() ?? row.createdAt),
+      escapeCsvCell(row.metadata),
+    ].join(','));
+  }
+  return lines.join('\n');
+}
 
 export class AuditService implements IAuditService {
   private db: any;
@@ -151,7 +185,105 @@ export class AuditService implements IAuditService {
       })
       .returning({ id: auditLogExports.id });
 
-    return exportReq.id;
+    const id = exportReq.id;
+    void this.processExportJob(id).catch((err) => {
+      this.ctx.logger.error('audit export job failed', err);
+    });
+
+    return id;
+  }
+
+  /** Background: query logs, write JSON/CSV under AUDIT_EXPORT_DIR, update row. */
+  private async processExportJob(exportId: string): Promise<void> {
+    const [row] = await this.db
+      .select()
+      .from(auditLogExports)
+      .where(eq(auditLogExports.id, exportId))
+      .limit(1);
+
+    if (!row || row.status !== 'pending') {
+      return;
+    }
+
+    await this.db
+      .update(auditLogExports)
+      .set({ status: 'processing' })
+      .where(eq(auditLogExports.id, exportId));
+
+    try {
+      const tenantId = row.tenantId;
+      const conditions = [
+        eq(auditLogs.tenantId, tenantId),
+        gte(auditLogs.createdAt, row.startDate),
+        lte(auditLogs.createdAt, row.endDate),
+      ];
+      const resourceTypes = row.resourceTypes as string[] | null;
+      if (resourceTypes?.length) {
+        conditions.push(inArray(auditLogs.resourceType, resourceTypes));
+      }
+
+      const logs = await this.db
+        .select()
+        .from(auditLogs)
+        .where(and(...conditions))
+        .orderBy(desc(auditLogs.createdAt));
+
+      const base = process.env.AUDIT_EXPORT_DIR || path.join(process.cwd(), 'data', 'audit-exports');
+      const tenantDir = path.join(base, tenantId);
+      await mkdir(tenantDir, { recursive: true });
+
+      const fmt = row.format === 'csv' ? 'csv' : 'json';
+      const relativeKey = path.join(tenantId, `${exportId}.${fmt}`);
+      const absPath = path.join(base, relativeKey);
+
+      const recordCount = logs.length;
+      let body: string;
+      if (fmt === 'csv') {
+        body = logsToCsv(logs as any);
+      } else {
+        body = JSON.stringify(
+          {
+            exportId,
+            tenantId,
+            generatedAt: new Date().toISOString(),
+            recordCount,
+            logs,
+          },
+          null,
+          2
+        );
+      }
+
+      await writeFile(absPath, body, 'utf8');
+      const statSize = Buffer.byteLength(body, 'utf8');
+      const expiresAt = new Date(Date.now() + EXPORT_TTL_MS);
+
+      await this.db
+        .update(auditLogExports)
+        .set({
+          status: 'completed',
+          fileUrl: relativeKey.replace(/\\/g, '/'),
+          fileSize: String(statSize),
+          recordCount: String(recordCount),
+          completedAt: new Date(),
+          expiresAt,
+          errorMessage: null,
+        })
+        .where(eq(auditLogExports.id, exportId));
+
+      await this.ctx.emit('audit.export.completed', { exportId, recordCount });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      await this.db
+        .update(auditLogExports)
+        .set({
+          status: 'failed',
+          errorMessage: message,
+          completedAt: new Date(),
+        })
+        .where(eq(auditLogExports.id, exportId));
+      await this.ctx.emit('audit.export.failed', { exportId, error: message });
+    }
   }
 
   async getExportStatus(exportId: string, tenantId: string): Promise<AuditExportDetail | null> {
@@ -173,10 +305,19 @@ export class AuditService implements IAuditService {
       .limit(1);
 
     if (!row) return null;
+    const downloadUrl =
+      row.status === 'completed' ? `/api/audit/exports/${row.id}/download` : null;
     return {
-      ...row,
-      fileSize: row.fileSize ? parseInt(row.fileSize) : null,
-      recordCount: row.recordCount ? parseInt(row.recordCount) : null,
+      id: row.id,
+      status: row.status,
+      format: row.format,
+      downloadUrl,
+      fileSize: row.fileSize ? parseInt(row.fileSize, 10) : null,
+      recordCount: row.recordCount ? parseInt(row.recordCount, 10) : null,
+      errorMessage: row.errorMessage,
+      createdAt: row.createdAt,
+      completedAt: row.completedAt,
+      expiresAt: row.expiresAt,
     };
   }
 
@@ -207,9 +348,17 @@ export class AuditService implements IAuditService {
 
     return {
       exports: rows.map((r: any) => ({
-        ...r,
-        fileSize: r.fileSize ? parseInt(r.fileSize) : null,
-        recordCount: r.recordCount ? parseInt(r.recordCount) : null,
+        id: r.id,
+        status: r.status,
+        format: r.format,
+        startDate: r.startDate,
+        endDate: r.endDate,
+        downloadUrl: r.status === 'completed' ? `/api/audit/exports/${r.id}/download` : null,
+        fileSize: r.fileSize ? parseInt(r.fileSize, 10) : null,
+        recordCount: r.recordCount ? parseInt(r.recordCount, 10) : null,
+        createdAt: r.createdAt,
+        completedAt: r.completedAt,
+        expiresAt: r.expiresAt,
       })),
       total: totalResult.count,
       hasMore: offset + rows.length < totalResult.count,
@@ -263,5 +412,79 @@ export class AuditService implements IAuditService {
 
     await this.ctx.emit('audit.cleanup.completed', { tenantId, deletedCount: totalDeleted });
     return totalDeleted;
+  }
+
+  async cleanupExpiredExportFiles(): Promise<number> {
+    const base = process.env.AUDIT_EXPORT_DIR || path.join(process.cwd(), 'data', 'audit-exports');
+    const now = new Date();
+    const stale = await this.db
+      .select({
+        id: auditLogExports.id,
+        fileUrl: auditLogExports.fileUrl,
+        expiresAt: auditLogExports.expiresAt,
+      })
+      .from(auditLogExports)
+      .where(
+        and(
+          isNotNull(auditLogExports.expiresAt),
+          lt(auditLogExports.expiresAt, now),
+          eq(auditLogExports.status, 'completed')
+        )
+      );
+
+    let purged = 0;
+    for (const r of stale) {
+      if (r.fileUrl) {
+        const abs = path.join(base, r.fileUrl);
+        try {
+          await unlink(abs);
+        } catch {
+          /* ignore missing file */
+        }
+      }
+      await this.db.delete(auditLogExports).where(eq(auditLogExports.id, r.id));
+      purged++;
+    }
+    return purged;
+  }
+
+  async runWeeklyMaintenance(): Promise<{ logsDeleted: number; exportsPurged: number }> {
+    const tenantRows = await this.db
+      .selectDistinct({ tenantId: auditLogs.tenantId })
+      .from(auditLogs);
+
+    let logsDeleted = 0;
+    for (const t of tenantRows) {
+      logsDeleted += await this.cleanupOldLogs(t.tenantId);
+    }
+
+    const exportsPurged = await this.cleanupExpiredExportFiles();
+    return { logsDeleted, exportsPurged };
+  }
+
+  async getExportDownloadPayload(
+    exportId: string,
+    tenantId: string
+  ): Promise<{ absolutePath: string; mime: string; filename: string } | null> {
+    const [row] = await this.db
+      .select({
+        status: auditLogExports.status,
+        format: auditLogExports.format,
+        fileUrl: auditLogExports.fileUrl,
+      })
+      .from(auditLogExports)
+      .where(and(eq(auditLogExports.id, exportId), eq(auditLogExports.tenantId, tenantId)))
+      .limit(1);
+
+    if (!row || row.status !== 'completed' || !row.fileUrl) {
+      return null;
+    }
+
+    const base = process.env.AUDIT_EXPORT_DIR || path.join(process.cwd(), 'data', 'audit-exports');
+    const absolutePath = path.join(base, row.fileUrl);
+    const fmt = row.format === 'csv' ? 'csv' : 'json';
+    const mime = fmt === 'csv' ? 'text/csv; charset=utf-8' : 'application/json; charset=utf-8';
+    const filename = `audit-export-${exportId.slice(0, 8)}.${fmt}`;
+    return { absolutePath, mime, filename };
   }
 }

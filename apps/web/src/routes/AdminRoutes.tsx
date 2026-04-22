@@ -12,6 +12,8 @@ import { AdminPlugins } from '../pages/admin/AdminPlugins';
 import { AdminTenants } from '../pages/admin/AdminTenants';
 import { SupportDashboard } from '../pages/admin/support/SupportDashboard';
 import { SupportTickets } from '../pages/admin/support/SupportTickets';
+import { SupportTicketDetail } from '../pages/admin/support/SupportTicketDetail';
+import { SupportCategories } from '../pages/admin/support/SupportCategories';
 import { AdminDomains } from '../pages/admin/AdminDomains';
 import { AdminSSL } from '../pages/admin/AdminSSL';
 import { AdminProvisioning } from '../pages/admin/AdminProvisioning';
@@ -33,67 +35,75 @@ import AdminPermissionGroups from '../pages/admin/AdminPermissionGroups';
 
 // Protect routes with permissions
 const ProtectedAdminDashboard = withPermission(AdminDashboard, {
-  permissionId: 'admin.dashboard.view'
+  permissionId: 'core.dashboard.view'
 });
 
 const ProtectedAdminClients = withPermission(AdminClients, {
-  permissionId: 'admin.clients.view'
+  permissionId: 'clients.clients.view'
 });
 
 const ProtectedAdminInvoices = withPermission(AdminInvoices, {
-  permissionId: 'admin.invoices.view'
+  permissionId: 'billing.invoices.view'
 });
 
 const ProtectedAdminPlans = withPermission(AdminPlans, {
-  permissionId: 'admin.plans.view'
+  permissionId: 'catalog.plans.view'
 });
 
 const ProtectedAdminPaymentGateways = withPermission(AdminPaymentGateways, {
-  permissionId: 'admin.payment_gateways.view'
+  permissionId: 'billing.payment_gateways.view'
 });
 
 const ProtectedAdminPlugins = withPermission(AdminPlugins, {
-  permissionId: 'admin.plugins.view'
+  permissionId: 'core.plugins.view'
 });
 
 const ProtectedAdminRolesAndPermissions = withPermission(AdminRolesAndPermissions, {
-  permissionId: 'admin.roles.manage'
+  permissionId: 'core.roles.manage'
 });
 
 const ProtectedAdminAuditLogs = withPermission(AdminAuditLogs, {
-  permissionId: 'admin.audit_logs.view'
+  permissionId: 'audit.logs.view'
 });
 
 const ProtectedAdminAnalytics = withPermission(AdminAnalytics, {
-  permissionId: 'admin.analytics.view'
+  permissionId: 'reporting.analytics.view'
 });
 
 const ProtectedAdminDomains = withPermission(AdminDomains, {
-  permissionId: 'admin.domains.view'
+  permissionId: 'domains.domains.view'
 });
 
 const ProtectedAdminBilling = withPermission(AdminBilling, {
-  permissionId: 'admin.billing.view'
+  permissionId: 'billing.billing.view'
 });
 
 const ProtectedCatalogDashboard = withPermission(CatalogDashboard, {
-  permissionId: 'admin.catalog.view'
+  permissionId: 'catalog.dashboard.view'
 });
 
 const ProtectedProductsManagement = withPermission(ProductsManagement, {
-  permissionId: 'admin.catalog.products.manage'
+  permissionId: 'catalog.products.manage'
 });
 
 const ProtectedComponentRegistrationManagement = withPermission(ComponentRegistrationManagement, {
-  permissionId: 'admin.catalog.components.manage'
+  permissionId: 'catalog.components.manage'
 });
 
 const ProtectedSupportDashboard = withPermission(SupportDashboard, {
-  permissionId: 'admin.support.view'
+  permissionId: 'support.dashboard.view'
 });
 
 const ProtectedSupportTickets = withPermission(SupportTickets, {
-  permissionId: 'admin.support.tickets.view'
+  permissionId: 'support.tickets.view'
+});
+
+const ProtectedSupportTicketDetail = withPermission(SupportTicketDetail, {
+  permissionId: 'support.tickets.view'
+});
+
+const ProtectedSupportCategories = withPermission(SupportCategories, {
+  permissionId: 'support.tickets.manage'
 });
 
 export function AdminRoutes() {
@@ -117,6 +127,8 @@ export function AdminRoutes() {
         {/* Support System Routes */}
         <Route path="support" element={<ProtectedSupportDashboard />} />
         <Route path="support/tickets" element={<ProtectedSupportTickets />} />
+        <Route path="support/tickets/:ticketId" element={<ProtectedSupportTicketDetail />} />
+        <Route path="support/categories" element={<ProtectedSupportCategories />} />
         <Route path="support/knowledge-base" element={<div className="p-6"><h1 className="text-2xl font-bold">Knowledge Base</h1><p className="text-gray-600">Coming soon...</p></div>} />
         <Route path="support/automation" element={<div className="p-6"><h1 className="text-2xl font-bold">Automation Rules</h1><p className="text-gray-600">Coming soon...</p></div>} />
         <Route path="support/agents" element={<div className="p-6"><h1 className="text-2xl font-bold">Agent Management</h1><p className="text-gray-600">Coming soon...</p></div>} />

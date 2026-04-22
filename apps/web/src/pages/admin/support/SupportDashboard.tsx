@@ -1,12 +1,14 @@
 import React from 'react';
+import { Link } from 'react-router-dom';
 import {
   MessageSquare,
   Clock,
   CheckCircle,
   AlertTriangle,
-  Users,
-  TrendingUp,
   Loader2,
+  ListTodo,
+  FolderTree,
+  ShieldAlert,
 } from 'lucide-react';
 import { useQuery } from '@tanstack/react-query';
 import { useAuth } from '../../../hooks/useAuth';
@@ -18,6 +20,12 @@ export function SupportDashboard() {
   const { data: supportStats, isLoading: statsLoading } = useQuery({
     queryKey: ['support', 'stats'],
     queryFn: () => supportApi.getStats(),
+    enabled: !!user,
+  });
+
+  const { data: sla, isLoading: slaLoading } = useQuery({
+    queryKey: ['support', 'sla', 'metrics'],
+    queryFn: () => supportApi.getSlaMetrics(),
     enabled: !!user,
   });
 
@@ -42,34 +50,28 @@ export function SupportDashboard() {
 
   const supportDashboardStats = [
     {
-      name: 'Total Tickets',
+      name: 'Total tickets',
       value: stats.totalTickets,
-      change: '+8%',
-      changeType: 'positive' as const,
       icon: MessageSquare,
       color: 'from-blue-500 to-cyan-500',
     },
     {
-      name: 'Open Tickets',
+      name: 'Open',
       value: stats.openTickets,
-      change: '-12%',
-      changeType: 'positive' as const,
       icon: AlertTriangle,
       color: 'from-yellow-500 to-orange-500',
     },
     {
-      name: 'In Progress',
+      name: 'In progress',
       value: stats.inProgressTickets,
-      change: '+5%',
-      changeType: 'positive' as const,
       icon: CheckCircle,
       color: 'from-green-500 to-emerald-500',
     },
     {
-      name: 'Avg Response Time',
-      value: stats.averageFirstResponseTime,
-      change: '-15%',
-      changeType: 'positive' as const,
+      name: 'Avg first response (min)',
+      value: Number.isFinite(stats.averageFirstResponseTime)
+        ? Math.round(stats.averageFirstResponseTime)
+        : 0,
       icon: Clock,
       color: 'from-purple-500 to-pink-500',
     },
@@ -94,10 +96,26 @@ export function SupportDashboard() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between flex-wrap gap-4">
         <div>
           <h1 className="text-3xl font-bold text-gray-900">Support Dashboard</h1>
-          <p className="text-gray-600 mt-1">Overview of customer support activities and performance</p>
+          <p className="text-gray-600 mt-1">Overview of tickets and SLA health</p>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <Link
+            to="/admin/support/tickets"
+            className="inline-flex items-center px-4 py-2 bg-purple-600 text-white rounded-lg text-sm font-medium hover:bg-purple-700"
+          >
+            <ListTodo className="w-4 h-4 mr-2" />
+            All tickets
+          </Link>
+          <Link
+            to="/admin/support/categories"
+            className="inline-flex items-center px-4 py-2 border border-gray-300 text-gray-800 rounded-lg text-sm font-medium hover:bg-gray-50"
+          >
+            <FolderTree className="w-4 h-4 mr-2" />
+            Categories
+          </Link>
         </div>
       </div>
 
@@ -108,16 +126,6 @@ export function SupportDashboard() {
               <div>
                 <p className="text-sm font-medium text-gray-600">{stat.name}</p>
                 <p className="text-3xl font-bold text-gray-900 mt-2">{stat.value}</p>
-                <div className="flex items-center mt-2">
-                  <span
-                    className={`text-sm font-medium ${
-                      stat.changeType === 'positive' ? 'text-green-600' : 'text-red-600'
-                    }`}
-                  >
-                    {stat.change}
-                  </span>
-                  <span className="text-sm text-gray-500 ml-1">from last week</span>
-                </div>
               </div>
               <div
                 className={`w-12 h-12 bg-gradient-to-r ${stat.color} rounded-lg flex items-center justify-center`}
@@ -129,20 +137,67 @@ export function SupportDashboard() {
         ))}
       </div>
 
+      {!slaLoading && sla && (
+        <div className="bg-white rounded-xl border border-gray-200 p-6">
+          <h2 className="text-lg font-semibold text-gray-900 mb-4 flex items-center gap-2">
+            <ShieldAlert className="w-5 h-5 text-amber-600" />
+            SLA snapshot
+          </h2>
+          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4 text-sm">
+            <div>
+              <p className="text-gray-500">First response SLA</p>
+              <p className="text-xl font-semibold text-gray-900">
+                {(sla.firstResponseSlaRate * 100).toFixed(0)}%
+              </p>
+            </div>
+            <div>
+              <p className="text-gray-500">Resolution SLA</p>
+              <p className="text-xl font-semibold text-gray-900">
+                {(sla.resolutionSlaRate * 100).toFixed(0)}%
+              </p>
+            </div>
+            <div>
+              <p className="text-gray-500">Breached</p>
+              <p className="text-xl font-semibold text-red-600">{sla.breachedTickets}</p>
+            </div>
+            <div>
+              <p className="text-gray-500">At risk</p>
+              <p className="text-xl font-semibold text-amber-600">{sla.atRiskTickets}</p>
+            </div>
+            <div>
+              <p className="text-gray-500">Avg first response</p>
+              <p className="text-xl font-semibold text-gray-900">
+                {Math.round(sla.averageFirstResponseTime)}m
+              </p>
+            </div>
+            <div>
+              <p className="text-gray-500">Avg resolution</p>
+              <p className="text-xl font-semibold text-gray-900">
+                {Math.round(sla.averageResolutionTime)}m
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
+
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <div className="lg:col-span-2 bg-white rounded-xl shadow-sm border border-gray-200">
-          <div className="p-6 border-b border-gray-200">
-            <h2 className="text-lg font-semibold text-gray-900">Recent Tickets</h2>
+          <div className="p-6 border-b border-gray-200 flex justify-between items-center">
+            <h2 className="text-lg font-semibold text-gray-900">Recent tickets</h2>
+            <Link to="/admin/support/tickets" className="text-sm text-purple-600 hover:text-purple-800">
+              View all
+            </Link>
           </div>
           <div className="p-6">
             {tickets.length > 0 ? (
               <div className="space-y-4">
                 {tickets.map((ticket) => (
-                  <div
+                  <Link
                     key={ticket.id}
-                    className="flex items-start space-x-3 p-3 rounded-lg hover:bg-gray-50 transition-colors"
+                    to={`/admin/support/tickets/${ticket.id}`}
+                    className="flex items-start space-x-3 p-3 rounded-lg hover:bg-gray-50 transition-colors block"
                   >
-                    <div className="w-8 h-8 rounded-full bg-blue-100 flex items-center justify-center">
+                    <div className="w-8 h-8 rounded-full bg-blue-100 flex items-center justify-center shrink-0">
                       <MessageSquare className="w-4 h-4 text-blue-600" />
                     </div>
                     <div className="flex-1 min-w-0">
@@ -159,7 +214,7 @@ export function SupportDashboard() {
                                   : 'bg-gray-100 text-gray-800'
                           }`}
                         >
-                          {(ticket.status || 'UNKNOWN').replace('_', ' ')}
+                          {(ticket.status || 'UNKNOWN').replace(/_/g, ' ')}
                         </span>
                       </div>
                       <p className="text-sm text-gray-600 truncate">{ticket.subject}</p>
@@ -172,7 +227,7 @@ export function SupportDashboard() {
                             <span className="mx-2">•</span>
                             <span
                               className={`px-1 py-0.5 rounded text-xs ${
-                                ticket.priority === 'HIGH'
+                                ticket.priority === 'HIGH' || ticket.priority === 'URGENT'
                                   ? 'bg-red-100 text-red-700'
                                   : ticket.priority === 'MEDIUM'
                                     ? 'bg-yellow-100 text-yellow-700'
@@ -185,7 +240,7 @@ export function SupportDashboard() {
                         )}
                       </div>
                     </div>
-                  </div>
+                  </Link>
                 ))}
               </div>
             ) : (
@@ -198,35 +253,33 @@ export function SupportDashboard() {
           </div>
         </div>
 
-        <div className="bg-white rounded-xl shadow-sm border border-gray-200">
-          <div className="p-6 border-b border-gray-200">
-            <h2 className="text-lg font-semibold text-gray-900">Quick Actions</h2>
-          </div>
-          <div className="p-6">
-            <div className="space-y-3">
-              <button
-                type="button"
-                className="w-full flex items-center justify-center px-4 py-3 bg-gradient-to-r from-purple-500 to-pink-500 text-white rounded-lg hover:from-purple-600 hover:to-pink-600 transition-all duration-200"
-              >
-                <MessageSquare className="w-4 h-4 mr-2" />
-                Create Ticket
-              </button>
-              <button
-                type="button"
-                className="w-full flex items-center justify-center px-4 py-3 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors"
-              >
-                <Users className="w-4 h-4 mr-2" />
-                Manage Agents
-              </button>
-              <button
-                type="button"
-                className="w-full flex items-center justify-center px-4 py-3 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors"
-              >
-                <TrendingUp className="w-4 h-4 mr-2" />
-                View Reports
-              </button>
-            </div>
-          </div>
+        <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
+          <h2 className="text-lg font-semibold text-gray-900 mb-4">By priority</h2>
+          <ul className="space-y-2 text-sm">
+            {Object.entries(stats.ticketsByPriority).length === 0 ? (
+              <li className="text-gray-500">No data</li>
+            ) : (
+              Object.entries(stats.ticketsByPriority).map(([k, v]) => (
+                <li key={k} className="flex justify-between">
+                  <span>{k}</span>
+                  <span className="font-medium">{v}</span>
+                </li>
+              ))
+            )}
+          </ul>
+          <h2 className="text-lg font-semibold text-gray-900 mt-6 mb-2">By category</h2>
+          <ul className="space-y-2 text-sm">
+            {Object.entries(stats.ticketsByCategory).length === 0 ? (
+              <li className="text-gray-500">No data</li>
+            ) : (
+              Object.entries(stats.ticketsByCategory).map(([k, v]) => (
+                <li key={k} className="flex justify-between">
+                  <span className="truncate mr-2">{k}</span>
+                  <span className="font-medium">{v}</span>
+                </li>
+              ))
+            )}
+          </ul>
         </div>
       </div>
     </div>

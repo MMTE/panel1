@@ -9,16 +9,31 @@ import {
   ShieldCheck,
   Activity
 } from 'lucide-react';
-import { trpc } from '../../../api/trpc';
+import { useQuery } from '@tanstack/react-query';
+import { catalogApi } from '../../../api/catalogApi';
 import { ComponentList } from './components/ComponentList';
 import ProductsManagement from './ProductsManagement';
 
 const CatalogDashboardContent: React.FC = () => {
-  const { data: components } = trpc.catalog.listComponents.useQuery();
-  const { data: providers } = trpc.catalog.getProviders.useQuery();
-  const { data: providerHealth } = trpc.catalog.getProviderHealth.useQuery();
+  const { data: components } = useQuery({
+    queryKey: ['catalog', 'components'],
+    queryFn: () => catalogApi.listComponents(),
+  });
+  const { data: providers } = useQuery({
+    queryKey: ['catalog', 'providers'],
+    queryFn: () => catalogApi.getProviders(),
+  });
+  const { data: providerHealth } = useQuery({
+    queryKey: ['catalog', 'providers-health'],
+    queryFn: () => catalogApi.getProviderHealth(),
+  });
+  const { data: productList = [] } = useQuery({
+    queryKey: ['catalog', 'products', 'dashboard-count'],
+    queryFn: () => catalogApi.listProducts({ isActive: true }),
+  });
 
-  const healthyProviders = providerHealth?.results.filter(r => r.healthy).length ?? 0;
+  const health = providerHealth as { results?: Array<{ healthy: boolean }> } | undefined;
+  const healthyProviders = health?.results?.filter((r) => r.healthy).length ?? 0;
   const totalProviders = providers?.length ?? 0;
 
   return (
@@ -66,7 +81,7 @@ const CatalogDashboardContent: React.FC = () => {
             </div>
             <div className="ml-4">
               <p className="text-sm font-medium text-gray-600">Products</p>
-              <p className="text-2xl font-bold text-gray-900">3</p>
+              <p className="text-2xl font-bold text-gray-900">{productList.length}</p>
             </div>
           </div>
         </div>

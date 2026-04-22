@@ -10,6 +10,13 @@ export interface IAuditService {
   getExports(tenantId: string, limit?: number, offset?: number): Promise<AuditExportsResult>;
   getFilterOptions(tenantId: string): Promise<AuditFilterOptions>;
   cleanupOldLogs(tenantId: string): Promise<number>;
+  /** Weekly maintenance: retention cleanup per tenant + expired export files */
+  runWeeklyMaintenance(): Promise<{ logsDeleted: number; exportsPurged: number }>;
+  /** Resolved file on disk for streaming download (completed exports only) */
+  getExportDownloadPayload(
+    exportId: string,
+    tenantId: string
+  ): Promise<{ absolutePath: string; mime: string; filename: string } | null>;
 }
 
 export interface AuditEvent {
@@ -75,14 +82,15 @@ export interface AuditExportRequest {
   startDate: Date;
   endDate: Date;
   resourceTypes?: string[];
-  format: 'json' | 'csv' | 'pdf';
+  format: 'json' | 'csv';
 }
 
 export interface AuditExportDetail {
   id: string;
   status: string;
   format: string;
-  fileUrl: string | null;
+  /** Public download path (relative to API origin), when export completed */
+  downloadUrl: string | null;
   fileSize: number | null;
   recordCount: number | null;
   errorMessage: string | null;
@@ -103,6 +111,7 @@ export interface AuditExportListItem {
   format: string;
   startDate: Date;
   endDate: Date;
+  downloadUrl: string | null;
   fileSize: number | null;
   recordCount: number | null;
   createdAt: Date;

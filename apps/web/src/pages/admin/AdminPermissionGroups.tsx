@@ -322,7 +322,7 @@ const AdminPermissionGroups: React.FC = () => {
     group.description.toLowerCase().includes(searchTerm.toLowerCase())
   ) || [];
 
-  if (!can('admin.roles.manage_permissions')) {
+  if (!can('core.roles.manage_permissions')) {
     return (
       <div className="flex items-center justify-center h-64">
         <div className="text-center">

@@ -1,5 +1,5 @@
 import { Worker, Job } from 'bullmq';
-import { JobScheduler } from './JobScheduler';
+import { operationalQueues } from './OperationalQueues';
 import { SubscriptionRenewalProcessor } from './processors/SubscriptionRenewalProcessor';
 import { subscriptionService } from '../subscription/SubscriptionService';
 import { dunningManager } from '../subscription/DunningManager';
@@ -23,15 +23,11 @@ export class JobProcessor {
     console.log('🔄 Initializing Job Processors...');
 
     try {
-      const jobScheduler = JobScheduler.getInstance();
-      await jobScheduler.initialize();
+      await operationalQueues.initialize();
 
-      // Check if Redis is available by testing if we have queues
-      const hasRedis = (jobScheduler as any).queues.size > 0;
+      const hasRedis = operationalQueues && (operationalQueues as any).queues?.size > 0;
 
       if (hasRedis) {
-        // Register job processors only if Redis is available
-        this.registerEventWorker();
         this.registerSubscriptionRenewalProcessor();
         this.registerInvoiceGenerationProcessor();
         this.registerPaymentRetryProcessor();
@@ -50,7 +46,6 @@ export class JobProcessor {
   }
 
   private registerSubscriptionRenewalProcessor(): void {
-    const jobScheduler = JobScheduler.getInstance();
     const redisConfig = {
       host: process.env.REDIS_HOST || 'localhost',
       port: parseInt(process.env.REDIS_PORT || '6379'),
@@ -100,8 +95,7 @@ export class JobProcessor {
       this.markJobStarted(job.data.jobId);
     });
 
-    // Store worker reference for cleanup
-    (jobScheduler as any).workers.set('subscription-renewal', worker);
+    operationalQueues.workers.set('subscription-renewal', worker);
 
     console.log('✅ Subscription renewal processor registered');
   }
@@ -136,8 +130,7 @@ export class JobProcessor {
       concurrency: 3,
     });
 
-    const jobScheduler = JobScheduler.getInstance();
-    (jobScheduler as any).workers.set('invoice-generation', worker);
+    operationalQueues.workers.set('invoice-generation', worker);
 
     console.log('✅ Invoice generation processor registered');
   }
@@ -185,8 +178,7 @@ export class JobProcessor {
       this.markJobStarted(job.data.jobId);
     });
 
-    const jobScheduler = JobScheduler.getInstance();
-    (jobScheduler as any).workers.set('payment-retry', worker);
+    operationalQueues.workers.set('payment-retry', worker);
 
     console.log('✅ Payment retry processor registered');
   }
@@ -239,49 +231,13 @@ export class JobProcessor {
       this.markJobStarted(job.data.jobId);
     });
 
-    const jobScheduler = JobScheduler.getInstance();
-    (jobScheduler as any).workers.set('dunning-management', worker);
+    operationalQueues.workers.set('dunning-management', worker);
 
     console.log('✅ Dunning management processor registered');
   }
 
-  private registerEventWorker(): void {
-    const redisConfig = {
-      host: process.env.REDIS_HOST || 'localhost',
-      port: parseInt(process.env.REDIS_PORT || '6379'),
-      password: process.env.REDIS_PASSWORD,
-    };
-
-    const worker = new Worker('events', async (job: Job) => {
-      const { type, payload, tenantId } = job.data;
-      console.log('---  ontvangen Event ---');
-      console.log(`✅ Received event [${type}] for tenant [${tenantId}]`);
-      console.log('Payload:', JSON.stringify(payload, null, 2));
-      console.log('---------------------');
-      // For now, we just log. In the future, this could trigger other services.
-      return { status: 'logged' };
-    }, {
-      connection: redisConfig,
-      concurrency: 10, // Can process multiple events concurrently
-    });
-
-    worker.on('completed', (job, result) => {
-      console.log(`Event job ${job.id} completed with result:`, result);
-    });
-
-    worker.on('failed', (job, err) => {
-      console.error(`Event job ${job?.id} failed:`, err);
-    });
-
-    const jobScheduler = JobScheduler.getInstance();
-    (jobScheduler as any).workers.set('events', worker);
-
-    console.log('✅ Event worker registered');
-  }
-
   async getJobStats(): Promise<Record<string, any>> {
-    const jobScheduler = JobScheduler.getInstance();
-    return await jobScheduler.getQueueStats();
+    return await operationalQueues.getQueueStats();
   }
 
   private async markJobStarted(jobId: string): Promise<void> {
@@ -346,8 +302,7 @@ export class JobProcessor {
   async shutdown(): Promise<void> {
     console.log('🔄 Shutting down Job Processors...');
     
-    const jobScheduler = JobScheduler.getInstance();
-    await jobScheduler.shutdown();
+    await operationalQueues.shutdown();
     
     this.initialized = false;
     console.log('✅ Job Processors shut down successfully');

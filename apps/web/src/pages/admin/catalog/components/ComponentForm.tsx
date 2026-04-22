@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
-import { trpc } from '../../../../api/trpc';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { catalogApi } from '../../../../api/catalogApi';
 import { AlertCircle, Loader2 } from 'lucide-react';
 
 interface ComponentFormProps {
@@ -8,23 +9,30 @@ interface ComponentFormProps {
 }
 
 export const ComponentForm: React.FC<ComponentFormProps> = ({ componentId, onClose }) => {
-  const utils = trpc.useContext();
-  const { data: providers } = trpc.catalog.getProviders.useQuery();
-  const { data: component, isLoading: isLoadingComponent } = trpc.catalog.getComponent.useQuery(
-    { id: componentId! },
-    { enabled: !!componentId }
-  );
+  const queryClient = useQueryClient();
+  const { data: providers = [] } = useQuery({
+    queryKey: ['catalog', 'providers'],
+    queryFn: () => catalogApi.getProviders(),
+  });
+  const { data: component, isLoading: isLoadingComponent } = useQuery({
+    queryKey: ['catalog', 'components', componentId],
+    queryFn: () => catalogApi.getComponentDefinition(componentId!),
+    enabled: !!componentId,
+  });
 
-  const createComponent = trpc.catalog.createComponent.useMutation({
+  const createComponent = useMutation({
+    mutationFn: (body: Record<string, unknown>) => catalogApi.createComponentDefinition(body),
     onSuccess: () => {
-      utils.catalog.listComponents.invalidate();
+      queryClient.invalidateQueries({ queryKey: ['catalog', 'components'] });
       onClose();
     },
   });
 
-  const updateComponent = trpc.catalog.updateComponent.useMutation({
+  const updateComponent = useMutation({
+    mutationFn: ({ id, data }: { id: string; data: Record<string, unknown> }) =>
+      catalogApi.updateComponentDefinition(id, data),
     onSuccess: () => {
-      utils.catalog.listComponents.invalidate();
+      queryClient.invalidateQueries({ queryKey: ['catalog', 'components'] });
       onClose();
     },
   });
@@ -50,7 +58,9 @@ export const ComponentForm: React.FC<ComponentFormProps> = ({ componentId, onClo
         isActive: component.isActive,
       });
 
-      const provider = providers?.find(p => p.componentKey === component.componentKey);
+      const provider = (providers as { componentKey: string }[])?.find(
+        (p) => p.componentKey === (component as { componentKey: string }).componentKey,
+      );
       if (provider) {
         setSelectedProvider(provider);
       }
@@ -58,7 +68,7 @@ export const ComponentForm: React.FC<ComponentFormProps> = ({ componentId, onClo
   }, [component, providers]);
 
   const handleProviderChange = (providerKey: string) => {
-    const provider = providers?.find(p => p.componentKey === providerKey);
+    const provider = (providers as { componentKey: string }[])?.find((p) => p.componentKey === providerKey);
     setSelectedProvider(provider);
     setFormData(prev => ({
       ...prev,
@@ -96,7 +106,7 @@ export const ComponentForm: React.FC<ComponentFormProps> = ({ componentId, onClo
         data: formData,
       });
     } else {
-      createComponent.mutate(formData);
+      createComponent.mutate(formData as Record<string, unknown>);
     }
   };
 
@@ -248,10 +258,10 @@ export const ComponentForm: React.FC<ComponentFormProps> = ({ componentId, onClo
         </button>
         <button
           type="submit"
-          disabled={createComponent.isLoading || updateComponent.isLoading}
+          disabled={createComponent.isPending || updateComponent.isPending}
           className="px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:opacity-50"
         >
-          {createComponent.isLoading || updateComponent.isLoading ? (
+          {createComponent.isPending || updateComponent.isPending ? (
             <Loader2 className="w-4 h-4 animate-spin" />
           ) : componentId ? (
             'Update Component'

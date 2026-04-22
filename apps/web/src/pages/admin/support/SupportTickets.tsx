@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { Link, useNavigate } from 'react-router-dom';
 import {
   MessageSquare,
   Search,
@@ -7,18 +8,23 @@ import {
   Clock,
   User,
   Calendar,
-  ExternalLink,
   Loader2,
 } from 'lucide-react';
-import { useQuery } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '../../../hooks/useAuth';
 import { supportApi } from '../../../api/supportApi';
 
 export function SupportTickets() {
   const { user } = useAuth();
+  const navigate = useNavigate();
+  const queryClient = useQueryClient();
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedFilter, setSelectedFilter] = useState('all');
   const [selectedPriority, setSelectedPriority] = useState('all');
+  const [showNew, setShowNew] = useState(false);
+  const [newSubject, setNewSubject] = useState('');
+  const [newBody, setNewBody] = useState('');
+  const [newPriority, setNewPriority] = useState<'LOW' | 'MEDIUM' | 'HIGH' | 'URGENT'>('MEDIUM');
 
   const { data: ticketsData, isLoading: ticketsLoading } = useQuery({
     queryKey: ['support', 'tickets', searchTerm, selectedFilter, selectedPriority],
@@ -31,6 +37,23 @@ export function SupportTickets() {
         offset: 0,
       }),
     enabled: !!user,
+  });
+
+  const createTicket = useMutation({
+    mutationFn: () =>
+      supportApi.createTicket({
+        subject: newSubject.trim(),
+        content: newBody.trim(),
+        priority: newPriority,
+      }),
+    onSuccess: (ticket) => {
+      setShowNew(false);
+      setNewSubject('');
+      setNewBody('');
+      queryClient.invalidateQueries({ queryKey: ['support', 'tickets'] });
+      queryClient.invalidateQueries({ queryKey: ['support', 'stats'] });
+      navigate(`/admin/support/tickets/${ticket.id}`);
+    },
   });
 
   const tickets = ticketsData?.tickets || [];
@@ -54,6 +77,8 @@ export function SupportTickets() {
       case 'IN_PROGRESS':
         return 'bg-yellow-100 text-yellow-800';
       case 'PENDING':
+      case 'WAITING_CUSTOMER':
+      case 'WAITING_STAFF':
         return 'bg-orange-100 text-orange-800';
       case 'RESOLVED':
         return 'bg-green-100 text-green-800';
@@ -66,6 +91,7 @@ export function SupportTickets() {
 
   const getPriorityColor = (priority: string | null) => {
     switch (priority) {
+      case 'URGENT':
       case 'HIGH':
         return 'bg-red-100 text-red-700';
       case 'MEDIUM':
@@ -88,12 +114,81 @@ export function SupportTickets() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between flex-wrap gap-4">
         <div>
           <h1 className="text-3xl font-bold text-gray-900">Support Tickets</h1>
           <p className="text-gray-600 mt-1">Manage and track customer support requests</p>
         </div>
+        <button
+          type="button"
+          onClick={() => setShowNew(true)}
+          className="bg-purple-600 hover:bg-purple-700 text-white px-4 py-2 rounded-lg flex items-center space-x-2 transition-colors"
+        >
+          <Plus className="w-4 h-4" />
+          <span>New ticket</span>
+        </button>
       </div>
+
+      {showNew && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+          <div className="bg-white rounded-xl shadow-xl max-w-lg w-full p-6 space-y-4">
+            <h2 className="text-lg font-semibold text-gray-900">Create ticket</h2>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Subject</label>
+              <input
+                type="text"
+                value={newSubject}
+                onChange={(e) => setNewSubject(e.target.value)}
+                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
+                placeholder="Summary"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Description</label>
+              <textarea
+                value={newBody}
+                onChange={(e) => setNewBody(e.target.value)}
+                rows={4}
+                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
+                placeholder="What should we know?"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Priority</label>
+              <select
+                value={newPriority}
+                onChange={(e) => setNewPriority(e.target.value as typeof newPriority)}
+                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
+              >
+                <option value="LOW">Low</option>
+                <option value="MEDIUM">Medium</option>
+                <option value="HIGH">High</option>
+                <option value="URGENT">Urgent</option>
+              </select>
+            </div>
+            {createTicket.isError && (
+              <p className="text-sm text-red-600">{(createTicket.error as Error).message}</p>
+            )}
+            <div className="flex justify-end gap-2 pt-2">
+              <button
+                type="button"
+                onClick={() => setShowNew(false)}
+                className="px-4 py-2 text-gray-700 border border-gray-300 rounded-lg text-sm"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={!newSubject.trim() || !newBody.trim() || createTicket.isPending}
+                onClick={() => createTicket.mutate()}
+                className="px-4 py-2 bg-purple-600 text-white rounded-lg text-sm disabled:opacity-50"
+              >
+                {createTicket.isPending ? 'Creating…' : 'Create'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
         <div className="flex flex-col sm:flex-row gap-4">
@@ -117,7 +212,8 @@ export function SupportTickets() {
               <option value="all">All Status</option>
               <option value="OPEN">Open</option>
               <option value="IN_PROGRESS">In Progress</option>
-              <option value="PENDING">Pending</option>
+              <option value="WAITING_CUSTOMER">Waiting customer</option>
+              <option value="WAITING_STAFF">Waiting staff</option>
               <option value="RESOLVED">Resolved</option>
               <option value="CLOSED">Closed</option>
             </select>
@@ -132,19 +228,12 @@ export function SupportTickets() {
             >
               <option value="all">All Priority</option>
               <option value="HIGH">High</option>
+              <option value="URGENT">Urgent</option>
               <option value="MEDIUM">Medium</option>
               <option value="LOW">Low</option>
             </select>
             <ChevronDown className="absolute right-2 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4 pointer-events-none" />
           </div>
-
-          <button
-            type="button"
-            className="bg-purple-600 hover:bg-purple-700 text-white px-4 py-2 rounded-lg flex items-center space-x-2 transition-colors"
-          >
-            <Plus className="w-4 h-4" />
-            <span>New Ticket</span>
-          </button>
         </div>
       </div>
 
@@ -156,7 +245,11 @@ export function SupportTickets() {
         <div className="divide-y divide-gray-200">
           {tickets.length > 0 ? (
             tickets.map((ticket) => (
-              <div key={ticket.id} className="p-6 hover:bg-gray-50 transition-colors">
+              <Link
+                key={ticket.id}
+                to={`/admin/support/tickets/${ticket.id}`}
+                className="block p-6 hover:bg-gray-50 transition-colors"
+              >
                 <div className="flex items-start justify-between">
                   <div className="flex-1">
                     <div className="flex items-center space-x-3 mb-2">
@@ -167,7 +260,7 @@ export function SupportTickets() {
                         <div className="flex items-center space-x-2">
                           <span className="font-mono text-sm text-gray-600">#{ticket.ticketNumber}</span>
                           <span className={`px-2 py-1 text-xs rounded-full ${getStatusColor(ticket.status)}`}>
-                            {(ticket.status || 'UNKNOWN').replace('_', ' ')}
+                            {(ticket.status || 'UNKNOWN').replace(/_/g, ' ')}
                           </span>
                           <span className={`px-2 py-1 text-xs rounded-full ${getPriorityColor(ticket.priority)}`}>
                             {ticket.priority || '—'}
@@ -201,17 +294,8 @@ export function SupportTickets() {
                       </div>
                     )}
                   </div>
-
-                  <div className="flex items-center space-x-2 ml-4">
-                    <button
-                      type="button"
-                      className="p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
-                    >
-                      <ExternalLink className="w-4 h-4" />
-                    </button>
-                  </div>
                 </div>
-              </div>
+              </Link>
             ))
           ) : (
             <div className="p-12 text-center">

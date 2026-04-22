@@ -1,4 +1,4 @@
-import { pgTable, varchar, text, boolean, jsonb, timestamp, primaryKey } from 'drizzle-orm/pg-core';
+import { pgTable, varchar, uuid, text, boolean, jsonb, timestamp, primaryKey } from 'drizzle-orm/pg-core';
 import { users } from './users';
 import { tenants } from './tenants';
 
@@ -47,11 +47,11 @@ export const roleHierarchy = pgTable('role_hierarchy', {
 }));
 
 export const userRoles = pgTable('user_roles', {
-  userId: varchar('user_id', { length: 255 })
+  userId: uuid('user_id')
     .references(() => users.id, { onDelete: 'cascade' }),
   roleId: varchar('role_id', { length: 255 })
     .references(() => roles.id, { onDelete: 'cascade' }),
-  tenantId: varchar('tenant_id', { length: 255 })
+  tenantId: uuid('tenant_id')
     .references(() => tenants.id, { onDelete: 'cascade' }),
   assignedAt: timestamp('assigned_at', { withTimezone: true }).defaultNow(),
   assignedBy: varchar('assigned_by', { length: 255 }),

@@ -14,7 +14,7 @@ import {
   NewDomainOperation
 } from '../../db/schema';
 import { eq, and, desc, sql } from 'drizzle-orm';
-import { JobScheduler } from '../jobs/JobScheduler';
+import { OperationalQueues } from '../jobs/OperationalQueues';
 
 interface DomainContact {
   firstName: string;
@@ -60,12 +60,12 @@ interface DnsRecordData {
 
 export class DomainManager extends EventEmitter {
   private static instance: DomainManager;
-  private jobScheduler: JobScheduler;
+  private jobScheduler: OperationalQueues;
   private initialized = false;
 
   private constructor() {
     super();
-    this.jobScheduler = JobScheduler.getInstance();
+    this.jobScheduler = OperationalQueues.getInstance();
   }
 
   static getInstance(): DomainManager {

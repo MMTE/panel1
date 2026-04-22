@@ -1,5 +1,4 @@
 import React, { useState, useEffect } from 'react';
-import { trpc } from '../../../../api/trpc';
 import { Plus, Trash2, Loader, CheckCircle, AlertCircle } from 'lucide-react';
 
 interface ComponentRegistrationFormProps {

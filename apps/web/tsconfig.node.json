@@ -10,7 +10,14 @@
     "allowImportingTsExtensions": true,
     "isolatedModules": true,
     "moduleDetection": "force",
-    "noEmit": true,
+
+    /* Project references (required by tsconfig.json references) */
+    "composite": true,
+    "declaration": true,
+    "declarationMap": true,
+    "emitDeclarationOnly": true,
+    "outDir": "./node_modules/.cache/tsconfig-node-out",
+    "tsBuildInfoFile": "./node_modules/.cache/tsconfig.node.tsbuildinfo",
 
     /* Linting */
     "strict": true,
@@ -18,5 +25,5 @@
     "noUnusedParameters": true,
     "noFallthroughCasesInSwitch": true
   },
-  "include": ["vite.config.ts"]
+  "include": ["vite.config.ts", "postcss.config.js", "tailwind.config.js"]
 }

@@ -1,6 +1,7 @@
-import React, { useState } from 'react';
-import { trpc } from '../../api/trpc';
+import React, { useState, useMemo } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
+import { catalogApi } from '../../api/catalogApi';
 import { 
   ShoppingCartIcon, 
   CheckIcon, 
@@ -45,7 +46,27 @@ export function ProductStorePage() {
   const addToCart = useCartStore((state) => state.addItem);
   const cartItems = useCartStore((state) => state.items);
   
-  const { data: products, isLoading, error } = trpc.catalog.listPublicProducts.useQuery();
+  const { data: rawProducts = [], isLoading, error } = useQuery({
+    queryKey: ['catalog', 'public-products'],
+    queryFn: () => catalogApi.listPublicProducts(),
+  });
+
+  const products = useMemo(() => {
+    return (rawProducts as Record<string, unknown>[]).map((p) => ({
+      ...p,
+      productComponents: ((p.components as Record<string, unknown>[]) || []).map((pc) => ({
+        id: pc.id as string,
+        pricingModel: pc.pricingModel,
+        pricingDetails: pc.pricingDetails,
+        componentDefinition: {
+          id: (pc.component as Record<string, unknown>)?.id as string,
+          name: (pc.component as Record<string, unknown>)?.name as string,
+          description: (pc.component as Record<string, unknown>)?.description as string | undefined,
+          type: ((pc.component as Record<string, unknown>)?.type as string) || 'OTHER',
+        },
+      })),
+    })) as Product[];
+  }, [rawProducts]);
 
   if (isLoading) {
     return (
@@ -60,7 +81,7 @@ export function ProductStorePage() {
       <div className="min-h-screen bg-gray-50 flex items-center justify-center">
         <div className="text-center">
           <h2 className="text-2xl font-bold text-gray-900 mb-4">Error Loading Products</h2>
-          <p className="text-gray-600">{error.message}</p>
+          <p className="text-gray-600">{error instanceof Error ? error.message : 'Unknown error'}</p>
         </div>
       </div>
     );

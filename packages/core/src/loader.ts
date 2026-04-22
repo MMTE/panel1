@@ -1,4 +1,11 @@
-import type { ModuleDefinition, ModuleContext } from '@panel1/types';
+import type {
+  ModuleDefinition,
+  ModuleContext,
+  ModuleUI,
+  EmailTransport,
+  EncryptionPort,
+  RetryPort,
+} from '@panel1/types';
 import { ServiceRegistry } from './services.js';
 import { EventBus, type EventBusOptions } from './events.js';
 import { FilterChain } from './filters.js';
@@ -23,6 +30,17 @@ export interface BootOptions {
   redis?: BootRedisOptions;
   /** Host-injected RBAC middleware factory (e.g. from apps/api). */
   requirePermission?: (...permissionIds: string[]) => unknown;
+  /** Optional host services wired into each module `ctx` (email, encryption, retry). */
+  hostInfra?: {
+    email?: EmailTransport;
+    encryption?: EncryptionPort;
+    retry?: RetryPort;
+  };
+  /**
+   * After all module `setup()` calls, before the core `JobScheduler` worker starts.
+   * Host apps use this to wire legacy operational queues/crons onto the same Redis-backed scheduler.
+   */
+  beforeJobSchedulerStart?: (ctx: { eventBus: EventBus; jobScheduler: JobScheduler }) => void | Promise<void>;
 }
 
 export interface BootResult {
@@ -33,7 +51,16 @@ export interface BootResult {
   dbManager: DbManager;
   moduleRoutes: Map<string, unknown>;
   modules: ModuleDefinition[];
+  failedModules: Array<{ name: string; error: Error }>;
+  bootedModules: string[];
+  moduleUi: Map<string, ModuleUI>;
 }
+
+export type HealthStatus = {
+  modules: Array<{ name: string; status: 'booted' | 'failed' }>;
+  events: Awaited<ReturnType<EventBus['getStats']>>;
+  jobs: Awaited<ReturnType<JobScheduler['listJobs']>>;
+};
 
 export function topologicalSort(modules: ModuleDefinition[]): ModuleDefinition[] {
   const byName = new Map(modules.map((m) => [m.name, m]));
@@ -90,6 +117,8 @@ export async function bootModules(options: BootOptions): Promise<BootResult> {
     eventBusOptions,
     jobSchedulerOptions,
     requirePermission,
+    hostInfra,
+    beforeJobSchedulerStart,
     redis: redisOpt,
   } = options;
 
@@ -116,6 +145,10 @@ export async function bootModules(options: BootOptions): Promise<BootResult> {
   });
   const dbManager = new DbManager(dbOptions);
 
+  const failedModules: Array<{ name: string; error: Error }> = [];
+  const bootedModules: string[] = [];
+  const moduleUi = new Map<string, ModuleUI>();
+
   await eventBus.start();
   const moduleRoutes = new Map<string, unknown>();
 
@@ -132,6 +165,14 @@ export async function bootModules(options: BootOptions): Promise<BootResult> {
   };
 
   for (const mod of sorted) {
+    const depFailed = (mod.deps || []).some((dep) => failedModules.some((f) => f.name === dep));
+    if (depFailed) {
+      const err = new Error(`Dependency failed for "${mod.name}"`);
+      failedModules.push({ name: mod.name, error: err });
+      console.error(`[core] Skipping "${mod.name}" — dependency failed`);
+      continue;
+    }
+
     let moduleConfig: Record<string, unknown> = {};
     if (mod.config) {
       moduleConfig = mod.config.parse({});
@@ -147,16 +188,34 @@ export async function bootModules(options: BootOptions): Promise<BootResult> {
       config: moduleConfig,
       routeCollector,
       requirePermission,
+      email: hostInfra?.email,
+      encryption: hostInfra?.encryption,
+      retry: hostInfra?.retry,
     });
 
-    await mod.setup(ctx);
-    console.log(`[core] Module "${mod.name}" v${mod.version} setup complete`);
-    await eventBus.emit('module.loaded', { name: mod.name });
+    try {
+      await mod.setup(ctx);
+      bootedModules.push(mod.name);
+      if (mod.ui) {
+        moduleUi.set(mod.name, mod.ui);
+      }
+      console.log(`[core] Module "${mod.name}" v${mod.version} setup complete`);
+      await eventBus.emit('module.loaded', { name: mod.name });
+    } catch (error) {
+      const e = error instanceof Error ? error : new Error(String(error));
+      failedModules.push({ name: mod.name, error: e });
+      console.error(`[core] Module "${mod.name}" setup failed:`, e);
+    }
+  }
+
+  if (beforeJobSchedulerStart) {
+    await beforeJobSchedulerStart({ eventBus, jobScheduler });
   }
 
   await jobScheduler.start();
 
-  console.log(`[core] All ${sorted.length} module(s) booted successfully`);
+  const ok = bootedModules.length;
+  console.log(`[core] Boot finished: ${ok}/${sorted.length} module(s) ok, ${failedModules.length} failed`);
 
   return {
     services,
@@ -166,5 +225,41 @@ export async function bootModules(options: BootOptions): Promise<BootResult> {
     dbManager,
     moduleRoutes,
     modules: sorted,
+    failedModules,
+    bootedModules,
+    moduleUi,
+  };
+}
+
+/**
+ * Graceful shutdown: stop accepting new jobs, stop event workers, module teardowns (reverse order), close DB.
+ */
+export async function shutdown(bootResult: BootResult): Promise<void> {
+  await bootResult.jobScheduler.stop();
+  await bootResult.eventBus.stop();
+
+  for (const mod of [...bootResult.modules].reverse()) {
+    if (!bootResult.bootedModules.includes(mod.name)) continue;
+    if (mod.teardown) {
+      try {
+        await mod.teardown();
+      } catch (e) {
+        console.error(`[core] teardown failed for "${mod.name}":`, e);
+      }
+    }
+  }
+
+  await bootResult.dbManager.close();
+}
+
+export async function health(bootResult: BootResult): Promise<HealthStatus> {
+  const failedSet = new Set(bootResult.failedModules.map((f) => f.name));
+  return {
+    modules: bootResult.modules.map((m) => ({
+      name: m.name,
+      status: failedSet.has(m.name) ? 'failed' : 'booted',
+    })),
+    events: await bootResult.eventBus.getStats(),
+    jobs: await bootResult.jobScheduler.listJobs(),
   };
 }

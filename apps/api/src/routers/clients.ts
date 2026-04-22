@@ -192,7 +192,7 @@ export const clientsRouter = router({
       return client;
     }),
 
-  create: requirePermission('client.create')
+  create: requirePermission('clients.clients.create')
     .input(z.object({
       email: z.string().email(),
       firstName: z.string().optional(),
@@ -256,7 +256,7 @@ export const clientsRouter = router({
       }
     }),
 
-  update: requirePermission('client.update')
+  update: requirePermission('clients.clients.edit')
     .input(z.object({
       id: z.string().uuid(),
       companyName: z.string().optional(),
@@ -334,7 +334,7 @@ export const clientsRouter = router({
       return updatedClient;
     }),
 
-  delete: requirePermission('client.delete')
+  delete: requirePermission('clients.clients.delete')
     .input(z.object({
       id: z.string().uuid(),
     }))
@@ -373,7 +373,7 @@ export const clientsRouter = router({
     }),
 
   // Get client statistics
-  getStats: requirePermission('client.read')
+  getStats: requirePermission('clients.clients.view')
     .query(async ({ ctx }) => {
       const [totalClients] = await db
         .select({ count: count() })

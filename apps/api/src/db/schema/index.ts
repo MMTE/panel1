@@ -1,3 +1,8 @@
+/**
+ * Schema barrel only — table/type re-exports for Drizzle.
+ * Do not create a `postgres()` or `drizzle()` instance here; use `../db/index.ts`
+ * so the app has a single connection pool.
+ */
 // Export all schemas
 export * from './users';
 export * from './tenants';

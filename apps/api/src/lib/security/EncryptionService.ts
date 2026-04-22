@@ -1,4 +1,4 @@
-import { EncryptionService } from '@panel1/core';
+import { createEncryptionService, EncryptionService } from '@panel1/core';
 
-export const encryptionService = EncryptionService.getInstance();
+export const encryptionService = createEncryptionService();
 export { EncryptionService };

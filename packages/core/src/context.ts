@@ -1,4 +1,11 @@
-import type { ModuleContext, Logger, ModuleJobOptions } from '@panel1/types';
+import type {
+  ModuleContext,
+  Logger,
+  ModuleJobOptions,
+  EmailTransport,
+  EncryptionPort,
+  RetryPort,
+} from '@panel1/types';
 import type { ServiceRegistry } from './services.js';
 import type { EventBus } from './events.js';
 import type { FilterChain } from './filters.js';
@@ -15,6 +22,10 @@ export interface ContextDeps {
   config: Record<string, unknown>;
   routeCollector: (moduleName: string, app: unknown) => void;
   requirePermission?: (...permissionIds: string[]) => unknown;
+  /** Injected by host (`apps/api`) — e.g. SMTP, encryption, RetryManager. */
+  email?: EmailTransport;
+  encryption?: EncryptionPort;
+  retry?: RetryPort;
 }
 
 function createModuleLogger(moduleName: string): Logger {
@@ -70,6 +81,9 @@ export function createModuleContext(deps: ContextDeps): ModuleContext {
     config: deps.config,
     logger,
     requirePermission: deps.requirePermission,
+    email: deps.email,
+    encryption: deps.encryption,
+    retry: deps.retry,
   };
 
   return ctx;

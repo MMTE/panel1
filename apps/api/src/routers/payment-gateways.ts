@@ -12,7 +12,7 @@ import { encryptionService } from '../lib/security/EncryptionService';
 import { paymentGatewayService } from '../lib/payments/PaymentGatewayService';
 
 export const paymentGatewaysRouter = router({
-  getAll: requirePermission('payment.read')
+  getAll: requirePermission('billing.payment_gateways.view')
     .input(z.object({
       search: z.string().optional(),
       status: z.enum(['ACTIVE', 'INACTIVE', 'PENDING_SETUP', 'ERROR']).optional(),
@@ -72,7 +72,7 @@ export const paymentGatewaysRouter = router({
       }
     }),
 
-  getTransactions: requirePermission('payment.read')
+  getTransactions: requirePermission('billing.payment_gateways.view')
     .input(z.object({
       limit: z.number().min(1).max(100).default(50),
       offset: z.number().min(0).default(0),
@@ -128,7 +128,7 @@ export const paymentGatewaysRouter = router({
       }
     }),
 
-  create: requirePermission('payment.create')
+  create: requirePermission('billing.payment_gateways.manage')
     .input(z.object({
       displayName: z.string().min(1).max(255),
       gatewayName: z.enum(['STRIPE', 'PAYPAL', 'SQUARE', 'CUSTOM']),
@@ -151,7 +151,7 @@ export const paymentGatewaysRouter = router({
       }
     }),
 
-  update: requirePermission('payment.update')
+  update: requirePermission('billing.payment_gateways.manage')
     .input(z.object({
       id: z.string().uuid(),
       displayName: z.string().min(1).max(255).optional(),
@@ -174,7 +174,7 @@ export const paymentGatewaysRouter = router({
       }
     }),
 
-  delete: requirePermission('payment.delete')
+  delete: requirePermission('billing.payment_gateways.manage')
     .input(z.object({
       id: z.string().uuid(),
     }))
@@ -191,7 +191,7 @@ export const paymentGatewaysRouter = router({
       }
     }),
 
-  testConnection: requirePermission('payment.execute')
+  testConnection: requirePermission('billing.payment_gateways.manage')
     .input(z.object({
       id: z.string().uuid(),
     }))

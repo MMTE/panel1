@@ -2,7 +2,7 @@ import { z } from 'zod';
 import { adminProcedure, protectedProcedure, router } from '../trpc/trpc';
 import { subscriptionService } from '../lib/subscription/SubscriptionService';
 import { dunningManager } from '../lib/subscription/DunningManager';
-import { jobScheduler } from '../lib/jobs/JobScheduler';
+import { operationalQueues } from '../lib/jobs/OperationalQueues';
 import { db } from '../db';
 import { subscriptions, subscriptionStateChanges, dunningAttempts, clients, subscriptionComponents, components } from '../db/schema';
 import { eq, and, desc } from 'drizzle-orm';
@@ -439,28 +439,28 @@ export const subscriptionsRouter = router({
   // Get job scheduler statistics
   getJobStats: adminProcedure
     .query(async () => {
-      const stats = await jobScheduler.getQueueStats();
+      const stats = await operationalQueues.getQueueStats();
       return stats;
     }),
 
   // Schedule renewal check (admin action)
   scheduleRenewalCheck: adminProcedure
     .mutation(async ({ ctx }) => {
-      await jobScheduler.scheduleSubscriptionRenewals();
+      await operationalQueues.scheduleSubscriptionRenewals();
       return { success: true, message: 'Renewal check scheduled' };
     }),
 
   // Process failed payments (admin action)
   processFailedPayments: adminProcedure
     .mutation(async ({ ctx }) => {
-      await jobScheduler.processFailedPayments();
+      await operationalQueues.processFailedPayments();
       return { success: true, message: 'Failed payment processing scheduled' };
     }),
 
   // Process dunning campaigns (admin action)
   processDunningCampaigns: adminProcedure
     .mutation(async ({ ctx }) => {
-      await jobScheduler.processDunningCampaigns();
+      await operationalQueues.processDunningCampaigns();
       return { success: true, message: 'Dunning campaigns scheduled' };
     }),
 

@@ -67,7 +67,8 @@ export function requirePermission(
       userId: ctx.user.id,
       role: ctx.user.role as any,
       tenantId: ctx.user.tenantId || undefined,
-      clientId: ctx.user.clientId || undefined,
+      clientId: (ctx.user as { clientId?: string | null }).clientId ?? undefined,
+      permissions: [] as string[],
     };
     
     const hasPermission = await permissionManager.hasPermission(

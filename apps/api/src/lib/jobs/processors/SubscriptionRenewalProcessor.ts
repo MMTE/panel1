@@ -2,7 +2,7 @@ import Queue from 'bull';
 import { db } from '../../../db';
 import { subscriptions, invoices, payments, plans, clients, tenants } from '../../../db/schema';
 import { eq, and } from 'drizzle-orm';
-import { JobData } from '../JobScheduler';
+import type { JobData } from '../OperationalQueues';
 import { TaxCalculationService } from '../../invoice/TaxCalculationService';
 
 export class SubscriptionRenewalProcessor {

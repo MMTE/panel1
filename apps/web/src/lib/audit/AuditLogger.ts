@@ -1,13 +1,12 @@
-// import { supabase } from '../supabase'; // TODO: Replace with tRPC
 import { getCurrentTenantId } from '../tenant/TenantManager';
-import { trpc } from '../../api/trpc';
+import { auditApi } from '../../api/auditApi';
 
 export interface AuditEvent {
   action: string;
   category: string;
   targetId?: string;
   targetType?: string;
-  metadata?: Record<string, any>;
+  metadata?: Record<string, unknown>;
   timestamp?: Date;
 }
 
@@ -27,17 +26,11 @@ export interface ExportOptions extends AuditTrailOptions {
 }
 
 /**
- * Audit logging system for Panel1
- * Provides comprehensive audit trails for security and compliance
- * TODO: Implement persistent storage with tRPC + Drizzle
+ * Client-side audit helper — posts to modular Hono `POST /api/audit/events`.
+ * Failures are swallowed so logging never breaks UX.
  */
 export class AuditLogger {
   private static instance: AuditLogger;
-  private trpcClient: typeof trpc;
-
-  private constructor() {
-    this.trpcClient = trpc;
-  }
 
   static getInstance(): AuditLogger {
     if (!AuditLogger.instance) {
@@ -46,159 +39,117 @@ export class AuditLogger {
     return AuditLogger.instance;
   }
 
-  /**
-   * Log an auth-related audit event
-   */
-  public async logAuth(action: string, userId: string = 'anonymous', metadata?: any): Promise<void> {
+  public async logAuth(action: string, userId: string = 'anonymous', metadata?: Record<string, unknown>): Promise<void> {
     const tenantId = getCurrentTenantId();
     return this.log({
       action,
       category: 'auth',
       targetId: userId,
       targetType: 'user',
-      metadata: {
-        ...metadata,
-        tenantId,
-      }
+      metadata: { ...metadata, tenantId },
     });
   }
 
-  /**
-   * Log a data change audit event
-   */
   public async logDataChange(
     action: 'create' | 'update' | 'delete',
     resourceType: string,
     resourceId: string,
-    oldValues?: any,
-    newValues?: any,
-    userId: string = 'system'
+    oldValues?: unknown,
+    newValues?: unknown,
+    userId: string = 'system',
   ): Promise<void> {
     const tenantId = getCurrentTenantId();
     return this.log({
-      action,
+      action: `data.${action}`,
       category: 'data',
       targetId: resourceId,
       targetType: resourceType,
-      metadata: {
-        userId,
-        tenantId,
-        oldValues,
-        newValues,
-      }
+      metadata: { userId, tenantId, oldValues, newValues },
     });
   }
 
-  /**
-   * Log a system-level audit event
-   */
-  public async logSystem(action: string, metadata?: any): Promise<void> {
+  public async logSystem(action: string, metadata?: Record<string, unknown>): Promise<void> {
     const tenantId = getCurrentTenantId();
     return this.log({
-      action,
+      action: `system.${action}`,
       category: 'system',
-      metadata: {
-        ...metadata,
-        tenantId,
-      }
+      metadata: { ...metadata, tenantId },
     });
   }
 
-  /**
-   * Log an audit event
-   */
   public async log(event: AuditEvent): Promise<void> {
     try {
-      await this.trpcClient.audit.logEvent.mutate({
-        action: event.action,
-        category: event.category,
-        targetId: event.targetId,
-        targetType: event.targetType,
-        metadata: event.metadata || {},
-        timestamp: event.timestamp || new Date()
+      const actionType = event.action.includes('.') ? event.action : `${event.category}.${event.action}`;
+      await auditApi.logEvent({
+        actionType,
+        resourceType: event.targetType || event.category || 'app',
+        resourceId: event.targetId,
+        metadata: {
+          ...(event.metadata || {}),
+          ...(event.timestamp ? { clientTimestamp: event.timestamp.toISOString() } : {}),
+        },
       });
     } catch (error) {
       console.error('Failed to log audit event:', error);
-      // Don't throw the error - we don't want audit logging failures to break the app
-      // Just log it to the console
     }
   }
 
-  /**
-   * Get audit trail with filtering options
-   */
   public async getAuditTrail(options: AuditTrailOptions = {}): Promise<AuditEvent[]> {
-    try {
-      const result = await this.trpcClient.audit.getAuditTrail.query({
-        startDate: options.startDate?.toISOString(),
-        endDate: options.endDate?.toISOString(),
-        category: options.category,
-        action: options.action,
-        targetId: options.targetId,
-        targetType: options.targetType,
-        limit: options.limit || 50,
-        offset: options.offset || 0
-      });
-
-      return result.events;
-    } catch (error) {
-      console.error('Failed to fetch audit trail:', error);
-      throw error;
-    }
+    const limit = options.limit ?? 50;
+    const offset = options.offset ?? 0;
+    const page = Math.floor(offset / limit) + 1;
+    const result = await auditApi.queryLogs({
+      page,
+      limit,
+      startDate: options.startDate?.toISOString(),
+      endDate: options.endDate?.toISOString(),
+      actionTypes: options.action,
+      resourceTypes: options.targetType,
+    });
+    return result.logs.map((row) => ({
+      action: row.actionType,
+      category: row.resourceType,
+      targetId: row.resourceId || undefined,
+      targetType: row.resourceType,
+      metadata: (row.metadata as Record<string, unknown>) || {},
+      timestamp: new Date(row.createdAt),
+    }));
   }
 
-  /**
-   * Export audit events in specified format
-   */
   public async exportAuditEvents(options: ExportOptions): Promise<Blob> {
-    try {
-      const response = await this.trpcClient.audit.exportAuditTrail.query({
-        format: options.format,
-        startDate: options.startDate?.toISOString(),
-        endDate: options.endDate?.toISOString(),
-        category: options.category,
-        action: options.action,
-        targetId: options.targetId,
-        targetType: options.targetType
-      });
-
-      // Convert the response to a Blob
-      const blob = new Blob(
-        [options.format === 'csv' ? response.csv : JSON.stringify(response.json, null, 2)],
-        { type: options.format === 'csv' ? 'text/csv' : 'application/json' }
-      );
-
-      return blob;
-    } catch (error) {
-      console.error('Failed to export audit events:', error);
-      throw error;
+    const start = options.startDate ?? new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+    const end = options.endDate ?? new Date();
+    const { exportId } = await auditApi.createExport({
+      startDate: start.toISOString(),
+      endDate: end.toISOString(),
+      format: options.format,
+      resourceTypes: options.targetType ? [options.targetType] : undefined,
+    });
+    const status = await auditApi.waitForExportReady(exportId);
+    if (status.status !== 'completed' || !status.downloadUrl) {
+      throw new Error(status.errorMessage || 'Export did not complete');
     }
+    return auditApi.downloadExportBlob(exportId);
   }
 }
 
-// Singleton instance
 const auditLogger = AuditLogger.getInstance();
-
 export { auditLogger };
 
-// Convenience functions with tenant context
-export const logAuth = async (action: string, userId: string = 'anonymous', metadata?: any) =>
+export const logAuth = async (action: string, userId: string = 'anonymous', metadata?: Record<string, unknown>) =>
   auditLogger.logAuth(action, userId, metadata);
 
 export const logDataChange = async (
   action: 'create' | 'update' | 'delete',
   resourceType: string,
   resourceId: string,
-  oldValues?: any,
-  newValues?: any,
-  userId?: string
+  oldValues?: unknown,
+  newValues?: unknown,
+  userId?: string,
 ) => auditLogger.logDataChange(action, resourceType, resourceId, oldValues, newValues, userId);
 
-export const logSystem = async (action: string, metadata?: any) =>
+export const logSystem = async (action: string, metadata?: Record<string, unknown>) =>
   auditLogger.logSystem(action, metadata);
 
-export const exportAuditEvents = (
-  startDate: Date,
-  endDate: Date,
-  format?: 'json' | 'csv'
-) => auditLogger.exportAuditEvents({ startDate, endDate, format });
+export const exportAuditEvents = (startDate: Date, endDate: Date, format?: 'json' | 'csv') =>
+  auditLogger.exportAuditEvents({ startDate, endDate, format: format ?? 'json' });

@@ -2,6 +2,8 @@ import { OpenAPIHono, createRoute, z } from '@hono/zod-openapi';
 import type { MiddlewareHandler } from 'hono';
 import type { Panel1AuthUser } from '@panel1/core';
 import type { ModuleContext } from '@panel1/types';
+import { createReadStream } from 'node:fs';
+import { Readable } from 'node:stream';
 import type { IAuditService } from './types.js';
 import { SEED_PERM } from './seed-permissions.js';
 
@@ -149,7 +151,7 @@ const createExportRoute = createRoute({
             startDate: z.string(),
             endDate: z.string(),
             resourceTypes: z.array(z.string()).optional(),
-            format: z.enum(['json', 'csv', 'pdf']).default('json'),
+            format: z.enum(['json', 'csv']).default('json'),
           }),
         },
       },
@@ -200,6 +202,7 @@ const listExportsRoute = createRoute({
               format: z.string(),
               startDate: z.string(),
               endDate: z.string(),
+              downloadUrl: z.string().nullable(),
               fileSize: z.number().nullable(),
               recordCount: z.number().nullable(),
               createdAt: z.string(),
@@ -212,6 +215,28 @@ const listExportsRoute = createRoute({
         },
       },
       description: 'List of audit exports',
+    },
+  },
+});
+
+// GET /exports/:exportId/download
+const downloadExportRoute = createRoute({
+  method: 'get',
+  path: '/exports/{exportId}/download',
+  request: {
+    params: z.object({ exportId: z.string() }),
+  },
+  responses: {
+    200: {
+      description: 'Export file (JSON or CSV)',
+    },
+    404: {
+      content: {
+        'application/json': {
+          schema: z.object({ error: z.string() }),
+        },
+      },
+      description: 'Export not found or not ready',
     },
   },
 });
@@ -231,7 +256,7 @@ const getExportStatusRoute = createRoute({
             id: z.string(),
             status: z.string(),
             format: z.string(),
-            fileUrl: z.string().nullable(),
+            downloadUrl: z.string().nullable(),
             fileSize: z.number().nullable(),
             recordCount: z.number().nullable(),
             errorMessage: z.string().nullable(),
@@ -299,6 +324,8 @@ export function auditRoutes(ctx: ModuleContext) {
   const app = new OpenAPIHono();
 
   const auditView = routePerm(ctx, SEED_PERM.auditLogsView);
+  const auditExportMw = routePerm(ctx, SEED_PERM.auditLogsExport);
+  const auditCleanupMw = routePerm(ctx, SEED_PERM.auditLogsCleanup);
 
   app.openapi({ ...queryLogsRoute, middleware: auditView }, async (c) => {
     const audit = ctx.service<IAuditService>('audit');
@@ -352,7 +379,7 @@ export function auditRoutes(ctx: ModuleContext) {
     return c.json(result, 200);
   });
 
-  app.openapi({ ...createExportRoute, middleware: auditView }, async (c) => {
+  app.openapi({ ...createExportRoute, middleware: auditExportMw }, async (c) => {
     const audit = ctx.service<IAuditService>('audit');
     const body = c.req.valid('json');
     const tenantId = c.get('tenantId') as string;
@@ -383,7 +410,7 @@ export function auditRoutes(ctx: ModuleContext) {
     }, 201);
   });
 
-  app.openapi({ ...listExportsRoute, middleware: auditView }, async (c) => {
+  app.openapi({ ...listExportsRoute, middleware: auditExportMw }, async (c) => {
     const audit = ctx.service<IAuditService>('audit');
     const { limit, offset } = c.req.valid('query');
     const tenantId = c.get('tenantId') as string;
@@ -391,7 +418,22 @@ export function auditRoutes(ctx: ModuleContext) {
     return c.json(result, 200);
   });
 
-  app.openapi({ ...getExportStatusRoute, middleware: auditView }, async (c) => {
+  app.openapi({ ...downloadExportRoute, middleware: auditExportMw }, async (c) => {
+    const audit = ctx.service<IAuditService>('audit');
+    const { exportId } = c.req.valid('param');
+    const tenantId = c.get('tenantId') as string;
+    const payload = await audit.getExportDownloadPayload(exportId, tenantId);
+    if (!payload) {
+      return c.json({ error: 'Export not available' }, 404);
+    }
+    const nodeStream = createReadStream(payload.absolutePath);
+    return c.body(Readable.toWeb(nodeStream), 200, {
+      'Content-Type': payload.mime,
+      'Content-Disposition': `attachment; filename="${payload.filename}"`,
+    });
+  });
+
+  app.openapi({ ...getExportStatusRoute, middleware: auditExportMw }, async (c) => {
     const audit = ctx.service<IAuditService>('audit');
     const { exportId } = c.req.valid('param');
     const tenantId = c.get('tenantId') as string;
@@ -409,7 +451,7 @@ export function auditRoutes(ctx: ModuleContext) {
     return c.json(result, 200);
   });
 
-  app.openapi({ ...cleanupRoute, middleware: auditView }, async (c) => {
+  app.openapi({ ...cleanupRoute, middleware: auditCleanupMw }, async (c) => {
     const audit = ctx.service<IAuditService>('audit');
     const tenantId = c.get('tenantId') as string;
     const deletedCount = await audit.cleanupOldLogs(tenantId);

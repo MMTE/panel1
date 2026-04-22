@@ -36,20 +36,12 @@ export interface EmailTemplate {
 }
 
 export class EmailService extends EventEmitter {
-  private static instance: EmailService;
   private transporter: nodemailer.Transporter | null = null;
   private config: EmailConfig | null = null;
   private initialized = false;
 
-  private constructor() {
+  constructor() {
     super();
-  }
-
-  static getInstance(): EmailService {
-    if (!EmailService.instance) {
-      EmailService.instance = new EmailService();
-    }
-    return EmailService.instance;
   }
 
   /**
@@ -78,7 +70,15 @@ export class EmailService extends EventEmitter {
       this.emit('initialized', config);
     } catch (error) {
       console.error('❌ Email service initialization failed:', error);
-      this.emit('error', error);
+      // Avoid bare emit('error') with no listeners — Node throws the passed Error (masks graceful paths)
+      if (this.listenerCount('error') > 0) {
+        this.emit('error', error);
+      }
+      // Allow boot without SMTP in dev/test or when NODE_ENV is unset (same as host graceful init)
+      if (process.env.NODE_ENV !== 'production') {
+        this.initialized = false;
+        return;
+      }
       throw error;
     }
   }
@@ -222,4 +222,9 @@ export class EmailService extends EventEmitter {
       metadata: { type: 'test', timestamp: new Date().toISOString() }
     });
   }
+}
+
+/** Prefer this over any singleton — host apps hold one instance and pass into `ctx.email`. */
+export function createEmailService(): EmailService {
+  return new EmailService();
 }

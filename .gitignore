@@ -28,6 +28,7 @@ logs/
 *.log
 
 # Runtime data
+data/audit-exports/
 pids/
 *.pid
 *.seed

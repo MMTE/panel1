@@ -28,6 +28,12 @@ This document defines the target architecture for Panel1. It is the authoritativ
 
 ---
 
+## Permission naming
+
+Permissions are strings: **`{module}.{resource}.{action}`** (e.g. `billing.invoices.view`, `support.tickets.manage`). Common actions: `view`, `create`, `edit`, `delete`, `manage`, `export`. Cross-cutting admin UI may use the `core.*` module prefix (e.g. `core.roles.view`, `core.dashboard.view`).
+
+---
+
 ## Design Principles
 
 1. **Modules are vertical slices.** Each module owns its schema, services, routes, events, jobs, and UI. A change to billing touches the billing module, not five directories.

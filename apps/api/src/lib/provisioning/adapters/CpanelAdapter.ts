@@ -1,10 +1,6 @@
-import {
-  WhmApiRequest,
-  WhmApiType,
-  WhmApiTokenHeader,
-  WhmApiResponse,
-  Argument,
-} from '@cpanel/api';
+import { createRequire } from 'node:module';
+const require = createRequire(import.meta.url);
+const { WhmApiRequest, WhmApiType, WhmApiTokenHeader, WhmApiResponse, Argument } = require('@cpanel/api');
 import {
   ProvisioningAdapter,
   ServiceParameters,

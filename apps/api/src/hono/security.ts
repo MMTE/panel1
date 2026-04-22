@@ -31,27 +31,37 @@ const hasPermissionForHono = async (
   permissionId: string,
   resourceContext?: unknown
 ): Promise<boolean> => {
-  return permissionManager.hasPermission(
+  return await permissionManager.hasPermission(
     {
       userId: ctx.userId,
       role: ctx.role as Role,
       tenantId: ctx.tenantId,
       clientId: ctx.clientId,
-      permissions: ctx.permissions,
+      permissions: ctx.permissions ?? [],
     },
     permissionId,
     resourceContext as ResourceContext | undefined
   );
 };
 
+/** Storefront catalog listing (replaces tRPC `catalog.listPublic`). */
+function skipCatalogPublicApi(c: { req: { path: string } }): boolean {
+  const p = c.req.path;
+  return p === '/api/catalog/public' || p.startsWith('/api/catalog/public/');
+}
+
 /** Applied to all `/api/*` Hono traffic (after OPTIONS short-circuit in Express). */
 export const apiBearerAuthMiddleware = createBearerAuthMiddleware({
   resolveUser: resolveUserFromBearerToken,
+  shouldSkipAuth: skipCatalogPublicApi,
 });
 
 /** Tenant from authenticated user only; 400 if missing. */
 export const apiTenantMiddleware = createTenantContextMiddleware({
   requireTenant: true,
+  shouldSkip: skipCatalogPublicApi as Parameters<
+    typeof createTenantContextMiddleware
+  >[0]['shouldSkip'],
 });
 
 /**

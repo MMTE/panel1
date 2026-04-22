@@ -116,6 +116,7 @@ export class JobScheduler {
             jobId: `repeat-${job.name}`,
             attempts,
             backoff: { type: 'exponential', delay: backoffDelay },
+            ...(job.options?.timeout != null ? { timeout: job.options.timeout } : {}),
           }
         );
       }
@@ -211,6 +212,7 @@ export class JobScheduler {
         { moduleName: entry.moduleName, jobName: entry.name, manual: true } satisfies JobData,
         {
           jobId: `manual-${entry.name}-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
+          ...(entry.options?.timeout != null ? { timeout: entry.options.timeout } : {}),
         }
       );
       await added.waitUntilFinished(this.queueEvents);

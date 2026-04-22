@@ -102,7 +102,7 @@ export class ComponentInvoiceService {
       }));
 
       // Emit invoice created event
-      await EventService.emit('invoice.created', {
+      await EventService.getInstance().emit('invoice.created', {
         invoiceId: invoice.id,
         tenantId: invoice.tenantId
       });

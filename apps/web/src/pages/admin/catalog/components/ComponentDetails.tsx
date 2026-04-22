@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
-import { trpc } from '../../../../api/trpc';
+import { useQuery } from '@tanstack/react-query';
+import { catalogApi } from '../../../../api/catalogApi';
 import { 
   Package, 
   Settings, 
@@ -27,9 +28,14 @@ export const ComponentDetails: React.FC<ComponentDetailsProps> = ({
   onDelete,
   onClose
 }) => {
-  const { data: component, isLoading, error } = trpc.catalog.getComponent.useQuery(
-    { id: componentId }
-  );
+  const {
+    data: component,
+    isLoading,
+    error,
+  } = useQuery({
+    queryKey: ['catalog', 'components', componentId],
+    queryFn: () => catalogApi.getComponentDefinition(componentId),
+  });
   const [showConfiguration, setShowConfiguration] = useState(false);
 
   if (isLoading) {

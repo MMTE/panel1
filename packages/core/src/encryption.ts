@@ -5,22 +5,13 @@ import crypto from 'crypto';
  * Uses AES-256-GCM algorithm with unique IV for each encryption
  */
 export class EncryptionService {
-  private static instance: EncryptionService;
   private readonly algorithm = 'aes-256-gcm';
   private readonly keyLength = 32; // 256 bits
   private readonly ivLength = 16; // 128 bits
   private readonly tagLength = 16; // 128 bits
 
-  private constructor() {
-    // Validate encryption key on initialization
+  constructor() {
     this.validateEncryptionKey();
-  }
-
-  static getInstance(): EncryptionService {
-    if (!EncryptionService.instance) {
-      EncryptionService.instance = new EncryptionService();
-    }
-    return EncryptionService.instance;
   }
 
   private getEncryptionKey(): Buffer {
@@ -156,4 +147,9 @@ export class EncryptionService {
   static generateKey(): string {
     return crypto.randomBytes(32).toString('hex');
   }
+}
+
+/** Prefer this over any singleton — host apps hold one instance and pass into `ctx.encryption`. */
+export function createEncryptionService(): EncryptionService {
+  return new EncryptionService();
 }

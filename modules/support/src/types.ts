@@ -21,6 +21,10 @@ export interface ISupportService {
     includeInternal?: boolean,
   ): Promise<TicketWithMessages | null>;
   getSupportStats(tenantId: string): Promise<SupportStats>;
+  /** Cron: SLA breach detection + profile escalation rules (all tenants). */
+  runEscalationCheck(): Promise<void>;
+  /** Cron: auto-close stale WAITING_CUSTOMER tickets. */
+  closeStaleTickets(): Promise<void>;
 }
 
 export type TicketStatus = 'OPEN' | 'IN_PROGRESS' | 'WAITING_CUSTOMER' | 'WAITING_STAFF' | 'RESOLVED' | 'CLOSED';
@@ -146,6 +150,10 @@ declare module '@panel1/types' {
     'support.ticket.closed': { ticketId: string; closedAt: Date };
     'support.ticket.escalated': { ticketId: string; level: number; reason: string };
     'support.ticket.assigned': { ticketId: string; agentId: string };
-    'support.sla.breached': { ticketId: string; breachType: string };
+    'support.sla.breached': {
+      ticketId: string;
+      tenantId: string;
+      breachType: 'first_response' | 'resolution';
+    };
   }
 }

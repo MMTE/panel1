@@ -19,9 +19,10 @@ npm run dev
 - Web: http://localhost:5173
 - MailHog UI: http://localhost:8025
 
-## Architecture
+## Documentation
 
-See [ARCHITECTURE.md](./ARCHITECTURE.md) for the full architectural specification.
+- [ARCHITECTURE.md](./ARCHITECTURE.md) — authoritative architectural specification
+- [docs/roadmap.md](./docs/roadmap.md) — migration roadmap and execution tracker
 
 ## License
 

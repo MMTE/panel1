@@ -5,8 +5,6 @@ import {
   sslValidationRecords 
 } from '../../db/schema';
 import { eq, and, desc } from 'drizzle-orm';
-import { EmailService } from '../email/EmailService';
-
 export interface SslCertificateRequest {
   certificateName: string;
   type: 'domain_validated' | 'organization_validated' | 'extended_validation' | 'wildcard' | 'multi_domain';
@@ -37,12 +35,9 @@ export interface ValidationRecord {
 
 export class SslCertificateManager {
   private static instance: SslCertificateManager;
-  private emailService: EmailService;
   private initialized = false;
 
-  private constructor() {
-    this.emailService = EmailService.getInstance();
-  }
+  private constructor() {}
 
   public static getInstance(): SslCertificateManager {
     if (!SslCertificateManager.instance) {

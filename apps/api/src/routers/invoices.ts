@@ -42,7 +42,7 @@ const CreateInvoiceInput = z.object({
 });
 
 export const invoicesRouter = router({
-  getAll: requirePermission('invoice.read')
+  getAll: requirePermission('billing.invoices.view')
     .input(z.object({
       limit: z.number().min(1).max(100).default(10),
       offset: z.number().min(0).default(0),
@@ -146,7 +146,7 @@ export const invoicesRouter = router({
       }
     }),
 
-  getById: requirePermission('invoice.read', ctx => ({
+  getById: requirePermission('billing.invoices.view', ctx => ({
     type: ResourceType.INVOICE,
     id: ctx.input.id,
     tenantId: ctx.tenantId || '',
@@ -175,7 +175,7 @@ export const invoicesRouter = router({
       return invoice;
     }),
 
-  getStats: requirePermission('invoice.read')
+  getStats: requirePermission('billing.invoices.view')
     .query(async ({ ctx }) => {
       // Get total invoices count
       const [totalInvoices] = await ctx.db
@@ -241,7 +241,7 @@ export const invoicesRouter = router({
       };
     }),
 
-  create: requirePermission('invoice.create')
+  create: requirePermission('billing.invoices.create')
     .input((input) => {
       const result = CreateInvoiceInput.safeParse(input);
       if (!result.success) {
@@ -320,7 +320,7 @@ export const invoicesRouter = router({
       return newInvoice;
     }),
 
-  updateStatus: requirePermission('invoice.update', ctx => ({
+  updateStatus: requirePermission('billing.invoices.edit', ctx => ({
     type: 'INVOICE',
     id: ctx.input.id,
     tenantId: ctx.tenantId || '',
@@ -373,7 +373,7 @@ export const invoicesRouter = router({
       return updatedInvoice;
     }),
 
-  generatePDF: requirePermission('invoice.read', ctx => ({
+  generatePDF: requirePermission('billing.invoices.view', ctx => ({
     type: 'INVOICE',
     id: ctx.input.id,
     tenantId: ctx.tenantId || '',
@@ -403,7 +403,7 @@ export const invoicesRouter = router({
     }),
 
   // Get invoices for current client user
-  getByClient: requirePermission('invoice.read_own')
+  getByClient: requirePermission('billing.invoices.view_own')
     .input(z.object({
       limit: z.number().min(1).max(100).default(10),
       offset: z.number().min(0).default(0),
@@ -468,7 +468,7 @@ export const invoicesRouter = router({
     }),
 
   // Process payment for invoice (client portal)
-  processPayment: requirePermission('invoice.process_payment', ctx => ({
+  processPayment: requirePermission('billing.invoices.process_payment', ctx => ({
     type: 'INVOICE',
     id: ctx.input.invoiceId,
     tenantId: ctx.tenantId || '',
@@ -597,7 +597,7 @@ export const invoicesRouter = router({
     }),
 
   // Confirm payment (webhook or client confirmation)
-  confirmPayment: requirePermission('invoice.process_payment')
+  confirmPayment: requirePermission('billing.invoices.process_payment')
     .input(z.object({
       paymentIntentId: z.string(),
       paymentMethodId: z.string().optional(),

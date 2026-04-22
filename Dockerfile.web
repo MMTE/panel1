@@ -1,0 +1,32 @@
+FROM node:18-alpine AS build
+
+WORKDIR /app
+
+COPY package.json package-lock.json* ./
+COPY apps/web/package.json apps/web/
+COPY packages/core/package.json packages/core/
+COPY packages/types/package.json packages/types/
+COPY modules/audit/package.json modules/audit/
+COPY modules/support/package.json modules/support/
+COPY turbo.json ./
+
+RUN npm install
+
+COPY . .
+
+ARG VITE_API_URL
+ENV VITE_API_URL=$VITE_API_URL
+
+RUN cd apps/web && npx vite build
+
+FROM node:18-alpine
+
+WORKDIR /app
+
+RUN npm install -g serve
+
+COPY --from=build /app/apps/web/dist ./dist
+
+EXPOSE 3000
+
+CMD ["serve", "dist", "-s", "-l", "3000"]

@@ -1,9 +1,12 @@
-import { Queue, Worker, Job } from 'bullmq';
-import cron from 'node-cron';
+import { Queue, Worker } from 'bullmq';
 import { db } from '../../db';
-import { subscriptions, scheduledJobs, payments, dunningAttempts } from '../../db/schema';
-import { eq, and, lte, gte, isNull, lt } from 'drizzle-orm';
+import { subscriptions, scheduledJobs, payments } from '../../db/schema';
+import { eq, and, lte, isNull, lt } from 'drizzle-orm';
 
+/**
+ * Legacy operational BullMQ queues (subscription renewal, invoicing, provisioning, etc.).
+ * Cron schedules for enqueueing work are registered on the core `@panel1/core` JobScheduler via `legacyBridge.ts`.
+ */
 export interface JobData {
   type: string;
   payload: any;
@@ -12,44 +15,41 @@ export interface JobData {
   maxAttempts?: number;
 }
 
-export class JobScheduler {
-  private static instance: JobScheduler;
+export class OperationalQueues {
+  private static instance: OperationalQueues;
   private queues: Map<string, Queue> = new Map();
-  private workers: Map<string, Worker> = new Map();
+  /** Workers registered by JobProcessor (legacy processors). */
+  workers = new Map<string, Worker>();
   private initialized = false;
-  
+
   private redisConfig = {
     host: process.env.REDIS_HOST || 'localhost',
-    port: parseInt(process.env.REDIS_PORT || '6379'),
+    port: parseInt(process.env.REDIS_PORT || '6379', 10),
     password: process.env.REDIS_PASSWORD,
   };
 
   private constructor() {}
 
-  static getInstance(): JobScheduler {
-    if (!JobScheduler.instance) {
-      JobScheduler.instance = new JobScheduler();
+  static getInstance(): OperationalQueues {
+    if (!OperationalQueues.instance) {
+      OperationalQueues.instance = new OperationalQueues();
     }
-    return JobScheduler.instance;
+    return OperationalQueues.instance;
   }
 
   async initialize(): Promise<void> {
     if (this.initialized) return;
 
-    console.log('🔄 Initializing Job Scheduler...');
+    console.log('🔄 Initializing operational BullMQ queues...');
 
     try {
-      // Test Redis connection first
       await this.testRedisConnection();
-      
-      // Initialize job queues
-      this.createQueue('events'); // Central event bus queue
+
       this.createQueue('subscription-renewal');
       this.createQueue('invoice-generation');
       this.createQueue('payment-retry');
       this.createQueue('dunning-management');
-      
-      // Provisioning queues
+
       this.createQueue('provisioning-provision');
       this.createQueue('provisioning-suspend');
       this.createQueue('provisioning-unsuspend');
@@ -57,20 +57,13 @@ export class JobScheduler {
       this.createQueue('provisioning-modify');
       this.createQueue('provisioning-sync');
       this.createQueue('provisioning-health-check');
-      
-      // Setup cron jobs
-      this.setupCronJobs();
-      
+
       this.initialized = true;
-      console.log('✅ Job Scheduler initialized successfully');
+      console.log('✅ Operational queues initialized successfully');
     } catch (error) {
-      console.error('❌ Failed to initialize Job Scheduler:', error);
-      console.error('💡 Make sure Redis is running: redis-server');
-      console.error('💡 Or install Redis: sudo apt install redis-server (Ubuntu) or brew install redis (macOS)');
-      
-      // Don't throw error - allow system to continue without job scheduling
-      console.log('⚠️ Job Scheduler will run in fallback mode (cron only)');
-      this.setupCronJobs();
+      console.error('❌ Failed to initialize operational queues:', error);
+      console.error('💡 Ensure Redis is running for background jobs.');
+      console.log('⚠️ Operational queues unavailable — renewal/invoice workers may not run.');
       this.initialized = true;
     }
   }
@@ -108,66 +101,13 @@ export class JobScheduler {
         },
       },
     });
-    
-    // Add error handling
+
     queue.on('error', (error) => {
       console.error(`Queue ${queueName} error:`, error);
     });
-    
+
     this.queues.set(queueName, queue);
     return queue;
-  }
-
-  private setupCronJobs(): void {
-    // Daily: Check for subscription renewals (runs at 1 AM)
-    cron.schedule('0 1 * * *', async () => {
-      console.log('🔄 Running daily subscription renewal check');
-      try {
-        await this.scheduleSubscriptionRenewals();
-      } catch (error) {
-        console.error('❌ Daily renewal check failed:', error);
-      }
-    }, {
-      timezone: 'UTC'
-    });
-
-    // Hourly: Process failed payments
-    cron.schedule('0 * * * *', async () => {
-      console.log('🔄 Running hourly failed payment processing');
-      try {
-        await this.processFailedPayments();
-      } catch (error) {
-        console.error('❌ Failed payment processing failed:', error);
-      }
-    }, {
-      timezone: 'UTC'
-    });
-
-    // Every 6 hours: Dunning management
-    cron.schedule('0 */6 * * *', async () => {
-      console.log('🔄 Running dunning management');
-      try {
-        await this.processDunningCampaigns();
-      } catch (error) {
-        console.error('❌ Dunning management failed:', error);
-      }
-    }, {
-      timezone: 'UTC'
-    });
-
-    // Every 30 minutes: Process scheduled jobs
-    cron.schedule('*/30 * * * *', async () => {
-      console.log('🔄 Processing scheduled jobs');
-      try {
-        await this.processScheduledJobs();
-      } catch (error) {
-        console.error('❌ Scheduled job processing failed:', error);
-      }
-    }, {
-      timezone: 'UTC'
-    });
-
-    console.log('⏰ Cron jobs scheduled successfully');
   }
 
   async addJob(queueName: string, jobData: JobData, options: any = {}): Promise<string> {
@@ -176,7 +116,6 @@ export class JobScheduler {
       throw new Error(`Queue ${queueName} not found`);
     }
 
-    // Create job record in database
     const [jobRecord] = await db
       .insert(scheduledJobs)
       .values({
@@ -191,19 +130,22 @@ export class JobScheduler {
       })
       .returning();
 
-    // Add job to queue with database ID
-    await queue.add(jobData.type, {
-      ...jobData,
-      jobId: jobRecord.id,
-    }, {
-      attempts: jobData.maxAttempts || 3,
-      backoff: {
-        type: 'exponential',
-        delay: 2000,
+    await queue.add(
+      jobData.type,
+      {
+        ...jobData,
+        jobId: jobRecord.id,
       },
-      delay: options.delay || 0,
-      ...options
-    });
+      {
+        attempts: jobData.maxAttempts || 3,
+        backoff: {
+          type: 'exponential',
+          delay: 2000,
+        },
+        delay: options.delay || 0,
+        ...options,
+      }
+    );
 
     return jobRecord.id;
   }
@@ -211,7 +153,6 @@ export class JobScheduler {
   async scheduleSubscriptionRenewals(): Promise<void> {
     console.log('📅 Checking for subscriptions due for renewal...');
 
-    // Get subscriptions due for renewal in next 24 hours
     const tomorrow = new Date();
     tomorrow.setDate(tomorrow.getDate() + 1);
     tomorrow.setHours(23, 59, 59, 999);
@@ -228,7 +169,7 @@ export class JobScheduler {
       );
 
     console.log(`📊 Found ${subscriptionsDue.length} subscriptions due for renewal`);
-    
+
     for (const subscription of subscriptionsDue) {
       try {
         await this.addJob('subscription-renewal', {
@@ -236,7 +177,7 @@ export class JobScheduler {
           payload: { subscriptionId: subscription.id },
           tenantId: subscription.tenantId!,
         });
-        
+
         console.log(`✅ Scheduled renewal for subscription: ${subscription.id}`);
       } catch (error) {
         console.error(`❌ Failed to schedule renewal for subscription ${subscription.id}:`, error);
@@ -247,33 +188,30 @@ export class JobScheduler {
   async processFailedPayments(): Promise<void> {
     console.log('💳 Processing failed payments...');
 
-    // Get payments that failed and haven't exceeded max retry attempts
     const failedPayments = await db
       .select()
       .from(payments)
-      .where(
-        and(
-          eq(payments.status, 'FAILED'),
-          lt(payments.attemptCount, 5) // Max 5 attempts
-        )
-      );
+      .where(and(eq(payments.status, 'FAILED'), lt(payments.attemptCount, 5)));
 
     console.log(`📊 Found ${failedPayments.length} failed payments to retry`);
-    
+
     for (const payment of failedPayments) {
       try {
-        // Calculate delay based on attempt number (exponential backoff)
-        const delayMinutes = Math.pow(2, payment.attemptCount) * 60; // 1h, 2h, 4h, 8h, 16h
-        const delay = delayMinutes * 60 * 1000; // Convert to milliseconds
+        const delayMinutes = Math.pow(2, payment.attemptCount) * 60;
+        const delay = delayMinutes * 60 * 1000;
 
-        await this.addJob('payment-retry', {
-          type: 'PAYMENT_RETRY',
-          payload: { paymentId: payment.id },
-          tenantId: payment.tenantId!,
-          attemptNumber: payment.attemptCount + 1,
-          maxAttempts: 5,
-        }, { delay });
-        
+        await this.addJob(
+          'payment-retry',
+          {
+            type: 'PAYMENT_RETRY',
+            payload: { paymentId: payment.id },
+            tenantId: payment.tenantId!,
+            attemptNumber: payment.attemptCount + 1,
+            maxAttempts: 5,
+          },
+          { delay }
+        );
+
         console.log(`✅ Scheduled payment retry for payment: ${payment.id} (attempt ${payment.attemptCount + 1})`);
       } catch (error) {
         console.error(`❌ Failed to schedule payment retry for payment ${payment.id}:`, error);
@@ -284,19 +222,13 @@ export class JobScheduler {
   async processDunningCampaigns(): Promise<void> {
     console.log('📧 Processing dunning campaigns...');
 
-    // Get subscriptions that are past due and need dunning management
     const pastDueSubscriptions = await db
       .select()
       .from(subscriptions)
-      .where(
-        and(
-          eq(subscriptions.status, 'PAST_DUE'),
-          isNull(subscriptions.canceledAt)
-        )
-      );
+      .where(and(eq(subscriptions.status, 'PAST_DUE'), isNull(subscriptions.canceledAt)));
 
     console.log(`📊 Found ${pastDueSubscriptions.length} past due subscriptions`);
-    
+
     for (const subscription of pastDueSubscriptions) {
       try {
         await this.addJob('dunning-management', {
@@ -304,7 +236,7 @@ export class JobScheduler {
           payload: { subscriptionId: subscription.id },
           tenantId: subscription.tenantId!,
         });
-        
+
         console.log(`✅ Scheduled dunning campaign for subscription: ${subscription.id}`);
       } catch (error) {
         console.error(`❌ Failed to schedule dunning campaign for subscription ${subscription.id}:`, error);
@@ -319,13 +251,8 @@ export class JobScheduler {
     const overdueJobs = await db
       .select()
       .from(scheduledJobs)
-      .where(
-        and(
-          eq(scheduledJobs.status, 'pending'),
-          lte(scheduledJobs.scheduledAt, now)
-        )
-      )
-      .limit(50); // Process in batches
+      .where(and(eq(scheduledJobs.status, 'pending'), lte(scheduledJobs.scheduledAt, now)))
+      .limit(50);
 
     console.log(`📊 Found ${overdueJobs.length} overdue jobs to process`);
 
@@ -346,39 +273,10 @@ export class JobScheduler {
 
         console.log(`✅ Processed scheduled job: ${job.id}`);
       } catch (error) {
+        const msg = error instanceof Error ? error.message : String(error);
         console.error(`❌ Failed to process scheduled job ${job.id}:`, error);
-        await this.markJobFailed(job.id, error.message);
+        await this.markJobFailed(job.id, msg);
       }
-    }
-  }
-
-  private async markJobStarted(jobId: string): Promise<void> {
-    try {
-      await db
-        .update(scheduledJobs)
-        .set({
-          status: 'running',
-          startedAt: new Date(),
-          updatedAt: new Date(),
-        })
-        .where(eq(scheduledJobs.id, jobId));
-    } catch (error) {
-      console.error(`Failed to mark job ${jobId} as started:`, error);
-    }
-  }
-
-  private async markJobCompleted(jobId: string): Promise<void> {
-    try {
-      await db
-        .update(scheduledJobs)
-        .set({
-          status: 'completed',
-          completedAt: new Date(),
-          updatedAt: new Date(),
-        })
-        .where(eq(scheduledJobs.id, jobId));
-    } catch (error) {
-      console.error(`Failed to mark job ${jobId} as completed:`, error);
     }
   }
 
@@ -400,13 +298,13 @@ export class JobScheduler {
 
   async getQueueStats(): Promise<Record<string, any>> {
     const stats: Record<string, any> = {};
-    
+
     for (const [queueName, queue] of this.queues) {
       const waiting = await queue.getWaiting();
       const active = await queue.getActive();
       const completed = await queue.getCompleted();
       const failed = await queue.getFailed();
-      
+
       stats[queueName] = {
         waiting: waiting.length,
         active: active.length,
@@ -414,28 +312,24 @@ export class JobScheduler {
         failed: failed.length,
       };
     }
-    
+
     return stats;
   }
 
   async shutdown(): Promise<void> {
-    console.log('🔄 Shutting down Job Scheduler...');
-    
-    // Close workers first
-    for (const [workerName, worker] of this.workers) {
+    console.log('🔄 Shutting down operational queues...');
+
+    for (const [, worker] of this.workers) {
       await worker.close();
-      console.log(`✅ Worker ${workerName} closed`);
     }
-    
-    // Then close queues
-    for (const [queueName, queue] of this.queues) {
+
+    for (const [, queue] of this.queues) {
       await queue.close();
-      console.log(`✅ Queue ${queueName} closed`);
     }
-    
+
     this.initialized = false;
-    console.log('✅ Job Scheduler shut down successfully');
+    console.log('✅ Operational queues shut down successfully');
   }
 }
 
-export const jobScheduler = JobScheduler.getInstance(); 
+export const operationalQueues = OperationalQueues.getInstance();

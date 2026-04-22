@@ -15,6 +15,32 @@ export function getAuthHeaders(extra?: HeadersInit): HeadersInit {
   return headers;
 }
 
+/** Unauthenticated JSON fetch (e.g. public storefront). */
+export async function fetchJsonPublic<T>(url: string, init: RequestInit = {}): Promise<T> {
+  const res = await fetch(url, {
+    ...init,
+    headers: {
+      'Content-Type': 'application/json',
+      ...(init?.headers && typeof init.headers === 'object' && !(init.headers instanceof Headers)
+        ? (init.headers as Record<string, string>)
+        : {}),
+    },
+  });
+  if (!res.ok) {
+    const text = await res.text();
+    let message = text;
+    try {
+      const j = JSON.parse(text) as { message?: string; error?: string };
+      message = j.message || j.error || text;
+    } catch {
+      /* ignore */
+    }
+    throw new Error(message || res.statusText);
+  }
+  if (res.status === 204) return undefined as T;
+  return res.json() as Promise<T>;
+}
+
 export async function fetchJson<T>(url: string, init?: RequestInit): Promise<T> {
   const res = await fetch(url, {
     ...init,
@@ -38,4 +64,28 @@ export async function fetchJson<T>(url: string, init?: RequestInit): Promise<T> 
   }
   if (res.status === 204) return undefined as T;
   return res.json() as Promise<T>;
+}
+
+export async function fetchBlob(url: string, init?: RequestInit): Promise<Blob> {
+  const res = await fetch(url, {
+    ...init,
+    headers: {
+      ...getAuthHeaders(),
+      ...(init?.headers && typeof init.headers === 'object' && !(init.headers instanceof Headers)
+        ? (init.headers as Record<string, string>)
+        : {}),
+    },
+  });
+  if (!res.ok) {
+    const text = await res.text();
+    let message = text;
+    try {
+      const j = JSON.parse(text) as { message?: string; error?: string };
+      message = j.message || j.error || text;
+    } catch {
+      /* ignore */
+    }
+    throw new Error(message || res.statusText);
+  }
+  return res.blob();
 }

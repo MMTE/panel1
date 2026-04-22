@@ -1,7 +1,8 @@
 /**
- * RBAC names from `apps/api` seed. Issue 1.2: align with `audit.*` in defineModule.
- * Export/cleanup reuse `view` until dedicated permissions exist in seed.
+ * Canonical RBAC names — aligned with `apps/api` seed (`audit.logs.view`).
  */
 export const SEED_PERM = {
-  auditLogsView: 'admin.audit_logs.view',
+  auditLogsView: 'audit.logs.view',
+  auditLogsExport: 'audit.logs.export',
+  auditLogsCleanup: 'audit.logs.cleanup',
 } as const;

@@ -10,26 +10,39 @@ import {
   Settings,
   RefreshCw
 } from 'lucide-react';
-import { trpc } from '../../../../api/trpc';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { catalogApi } from '../../../../api/catalogApi';
 import { ComponentForm } from './ComponentForm';
 
 export const ComponentList: React.FC = () => {
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [selectedComponent, setSelectedComponent] = useState<string | null>(null);
 
-  const utils = trpc.useContext();
-  const { data: components, isLoading } = trpc.catalog.listComponents.useQuery();
-  const { data: providers } = trpc.catalog.getProviders.useQuery();
-  const { data: providerHealth } = trpc.catalog.getProviderHealth.useQuery();
+  const queryClient = useQueryClient();
+  const { data: components, isLoading } = useQuery({
+    queryKey: ['catalog', 'components'],
+    queryFn: () => catalogApi.listComponents(),
+  });
+  const { data: providers } = useQuery({
+    queryKey: ['catalog', 'providers'],
+    queryFn: () => catalogApi.getProviders(),
+  });
+  const { data: providerHealth } = useQuery({
+    queryKey: ['catalog', 'providers-health'],
+    queryFn: () => catalogApi.getProviderHealth(),
+  });
 
-  const deleteComponent = trpc.catalog.deleteComponent.useMutation({
+  const deleteComponent = useMutation({
+    mutationFn: (id: string) => catalogApi.deleteComponentDefinition(id),
     onSuccess: () => {
-      utils.catalog.listComponents.invalidate();
+      queryClient.invalidateQueries({ queryKey: ['catalog', 'components'] });
     },
   });
 
   const getProviderStatus = (componentKey: string) => {
-    const health = providerHealth?.results.find(r => r.componentKey === componentKey);
+    const health = (providerHealth as { results?: Array<{ componentKey: string; healthy: boolean; message?: string }> } | undefined)?.results?.find(
+      (r) => r.componentKey === componentKey,
+    );
     if (!health) return { healthy: false, message: 'Provider not found' };
     return {
       healthy: health.healthy,
@@ -96,7 +109,7 @@ export const ComponentList: React.FC = () => {
                   <button
                     onClick={() => {
                       if (confirm('Are you sure you want to delete this component?')) {
-                        deleteComponent.mutate({ id: component.id });
+                        deleteComponent.mutate(component.id);
                       }
                     }}
                     className="p-1 text-gray-500 hover:text-red-600 transition-colors"
@@ -144,7 +157,7 @@ export const ComponentList: React.FC = () => {
                       Supported Features
                     </h4>
                     <div className="flex flex-wrap gap-2">
-                      {component.metadata.supportedPricingModels.map((model) => (
+                      {(component.metadata?.supportedPricingModels || []).map((model: string) => (
                         <span
                           key={model}
                           className="px-2 py-1 bg-gray-100 text-gray-700 text-xs rounded-full"

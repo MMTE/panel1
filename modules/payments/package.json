@@ -1,0 +1,29 @@
+{
+  "name": "@panel1/mod-payments",
+  "version": "0.1.0",
+  "description": "Panel1 payments module",
+  "private": true,
+  "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts",
+    "./types": "./src/types.ts"
+  },
+  "scripts": {
+    "build": "tsc --noEmit",
+    "lint": "eslint src --ext .ts"
+  },
+  "dependencies": {
+    "@panel1/types": "*",
+    "@panel1/core": "*",
+    "@hono/zod-openapi": "^0.18.4",
+    "drizzle-orm": "^0.29.3",
+    "hono": "^4.7.5",
+    "stripe": "^17.4.0",
+    "zod": "^3.22.4"
+  },
+  "devDependencies": {
+    "typescript": "^5.5.3"
+  }
+}

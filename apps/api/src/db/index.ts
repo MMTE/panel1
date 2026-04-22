@@ -16,7 +16,7 @@ if (!process.env.DATABASE_URL) {
 
 // Create the connection
 const connectionString = process.env.DATABASE_URL;
-const client = postgres(connectionString, { max: 1 });
+const client = postgres(connectionString, { max: 10 });
 
 // Create the drizzle instance with schema
 export const db = drizzle(client, { schema });

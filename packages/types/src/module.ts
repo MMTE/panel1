@@ -5,6 +5,8 @@ import type { EventMap, EventHandler, FilterHandler } from './events.js';
 export interface ModuleJobOptions {
   maxRetries?: number;
   backoffMs?: number;
+  /** Job execution timeout in milliseconds (BullMQ `timeout` option). */
+  timeout?: number;
 }
 
 export interface ModuleDefinition {
@@ -13,6 +15,8 @@ export interface ModuleDefinition {
   deps?: string[];
 
   setup(ctx: ModuleContext): void | Promise<void>;
+  /** Reverse-order cleanup on `shutdown()` */
+  teardown?: () => void | Promise<void>;
 
   schema?: Record<string, unknown>;
   config?: ZodSchema;
@@ -45,12 +49,39 @@ export interface ModuleContext {
   config: Record<string, unknown>;
   logger: Logger;
   email?: EmailTransport;
+  /** Sensitive fields at rest — from host (`apps/api` boot). */
+  encryption?: EncryptionPort;
+  /** Retries / circuit breaker — from host (`@panel1/core` RetryManager). */
+  retry?: RetryPort;
 
   /**
    * Injected by host app (`apps/api` boot). Hono middleware factory; OR semantics across ids.
-   * Canonical permission names: see ARCHITECTURE.md / roadmap issue 1.2 (seed may still use legacy ids).
+   * Canonical permission names: see ARCHITECTURE.md (`{module}.{resource}.{action}`).
    */
   requirePermission?: (...permissionIds: string[]) => unknown;
+}
+
+/** Matches `@panel1/core` RetryConfig shape — duplicated here so `types` stays dependency-free. */
+export interface RetryConfig {
+  maxAttempts: number;
+  baseDelay: number;
+  maxDelay: number;
+  backoffMultiplier: number;
+  retryCondition?: (error: Error) => boolean;
+  onRetry?: (attempt: number, error: Error) => void;
+}
+
+export interface RetryPort {
+  executeWithRetry<T>(
+    operation: () => Promise<T>,
+    config: RetryConfig,
+    operationName?: string
+  ): Promise<T>;
+}
+
+export interface EncryptionPort {
+  encrypt(plaintext: string): string;
+  decrypt(ciphertext: string): string;
 }
 
 export interface EmailTransport {

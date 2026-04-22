@@ -12,19 +12,32 @@ import {
 import { db } from '../db/index.js';
 import { eq } from 'drizzle-orm';
 import { tenants, users } from '../db/schema/index.js';
-import { permissionManager, Role } from '../lib/auth/PermissionManager.js';
+import {
+  permissionManager,
+  Role,
+  type UserPermissionContext,
+} from '../lib/auth/PermissionManager.js';
 import { roles, permissions, rolePermissions, roleHierarchy, userRoles, permissionGroups, permissionGroupItems } from '../db/schema/roles';
 import { nanoid } from 'nanoid';
-import { PermissionManager } from '../lib/auth/PermissionManager';
+function userPermissionContext(ctx: {
+  user: { id: string; role: string; tenantId?: string; clientId?: string | null };
+}): UserPermissionContext {
+  return {
+    userId: ctx.user.id,
+    role: ctx.user.role as Role,
+    tenantId: ctx.user.tenantId,
+    clientId: ctx.user.clientId ?? undefined,
+    permissions: [],
+  };
+}
 
 // Helper function to attach permissions to a user object
-const attachPermissionsToUser = (user: AuthUser): AuthUser => {
+const attachPermissionsToUser = async (user: AuthUser): Promise<AuthUser> => {
   const roleEnum = user.role.toUpperCase() as keyof typeof Role;
   if (Object.values(Role).includes(roleEnum as Role)) {
-    const permissions = permissionManager.getRolePermissions(roleEnum as Role);
-    return { ...user, permissions };
+    const perms = await permissionManager.getRolePermissions(roleEnum as Role);
+    return { ...user, permissions: perms };
   }
-  // Return user without permissions if role is invalid
   return { ...user, permissions: [] };
 };
 
@@ -82,7 +95,7 @@ export const authRouter = router({
       // Create session
       const token = await createSession(user.id);
 
-      const userWithPermissions = attachPermissionsToUser(user);
+      const userWithPermissions = await attachPermissionsToUser(user);
 
       return {
         user: userWithPermissions,
@@ -121,7 +134,7 @@ export const authRouter = router({
           tenantId: user.tenantId,
         };
 
-        const userWithPermissions = attachPermissionsToUser(authUser);
+        const userWithPermissions = await attachPermissionsToUser(authUser);
 
         return {
           user: userWithPermissions,
@@ -161,7 +174,7 @@ export const authRouter = router({
         });
       }
 
-      const userWithPermissions = attachPermissionsToUser(ctx.user);
+      const userWithPermissions = await attachPermissionsToUser(ctx.user);
       return userWithPermissions;
     }),
 
@@ -185,7 +198,7 @@ export const authRouter = router({
         ...input,
       };
 
-      const userWithPermissions = attachPermissionsToUser(updatedUser);
+      const userWithPermissions = await attachPermissionsToUser(updatedUser);
       return userWithPermissions;
     }),
 
@@ -220,7 +233,7 @@ export const authRouter = router({
         tenantId: sessionData.users.tenantId,
       };
 
-      const userWithPermissions = attachPermissionsToUser(user);
+      const userWithPermissions = await attachPermissionsToUser(user);
 
       return {
         user: userWithPermissions,
@@ -302,7 +315,7 @@ export const authRouter = router({
         tenantId: userTenantId,
       };
 
-      const userWithPermissions = attachPermissionsToUser(userWithTenant);
+      const userWithPermissions = await attachPermissionsToUser(userWithTenant);
 
       return {
         user: userWithPermissions,
@@ -314,10 +327,9 @@ export const authRouter = router({
   createRole: protectedProcedure
     .input(roleSchema)
     .mutation(async ({ input, ctx }) => {
-      const permissionManager = PermissionManager.getInstance();
       const hasPermission = await permissionManager.hasPermission(
-        { userId: ctx.user.id, role: ctx.user.role },
-        'admin.roles.create'
+        userPermissionContext(ctx),
+        'core.roles.create'
       );
 
       if (!hasPermission) {
@@ -341,10 +353,9 @@ export const authRouter = router({
       data: roleSchema.partial()
     }))
     .mutation(async ({ input, ctx }) => {
-      const permissionManager = PermissionManager.getInstance();
       const hasPermission = await permissionManager.hasPermission(
-        { userId: ctx.user.id, role: ctx.user.role },
-        'admin.roles.update'
+        userPermissionContext(ctx),
+        'core.roles.edit'
       );
 
       if (!hasPermission) {
@@ -365,10 +376,9 @@ export const authRouter = router({
   deleteRole: protectedProcedure
     .input(z.object({ id: z.string() }))
     .mutation(async ({ input, ctx }) => {
-      const permissionManager = PermissionManager.getInstance();
       const hasPermission = await permissionManager.hasPermission(
-        { userId: ctx.user.id, role: ctx.user.role },
-        'admin.roles.delete'
+        userPermissionContext(ctx),
+        'core.roles.delete'
       );
 
       if (!hasPermission) {
@@ -384,10 +394,9 @@ export const authRouter = router({
 
   getRoles: protectedProcedure
     .query(async ({ ctx }) => {
-      const permissionManager = PermissionManager.getInstance();
       const hasPermission = await permissionManager.hasPermission(
-        { userId: ctx.user.id, role: ctx.user.role },
-        'admin.roles.view'
+        userPermissionContext(ctx),
+        'core.roles.view'
       );
 
       if (!hasPermission) {
@@ -404,10 +413,9 @@ export const authRouter = router({
   createPermission: protectedProcedure
     .input(permissionSchema)
     .mutation(async ({ input, ctx }) => {
-      const permissionManager = PermissionManager.getInstance();
       const hasPermission = await permissionManager.hasPermission(
-        { userId: ctx.user.id, role: ctx.user.role },
-        'admin.permissions.create'
+        userPermissionContext(ctx),
+        'core.roles.manage_permissions'
       );
 
       if (!hasPermission) {
@@ -431,10 +439,9 @@ export const authRouter = router({
       data: permissionSchema.partial()
     }))
     .mutation(async ({ input, ctx }) => {
-      const permissionManager = PermissionManager.getInstance();
       const hasPermission = await permissionManager.hasPermission(
-        { userId: ctx.user.id, role: ctx.user.role },
-        'admin.permissions.update'
+        userPermissionContext(ctx),
+        'core.roles.manage_permissions'
       );
 
       if (!hasPermission) {
@@ -455,10 +462,9 @@ export const authRouter = router({
   deletePermission: protectedProcedure
     .input(z.object({ id: z.string() }))
     .mutation(async ({ input, ctx }) => {
-      const permissionManager = PermissionManager.getInstance();
       const hasPermission = await permissionManager.hasPermission(
-        { userId: ctx.user.id, role: ctx.user.role },
-        'admin.permissions.delete'
+        userPermissionContext(ctx),
+        'core.roles.manage_permissions'
       );
 
       if (!hasPermission) {
@@ -474,10 +480,9 @@ export const authRouter = router({
 
   getPermissions: protectedProcedure
     .query(async ({ ctx }) => {
-      const permissionManager = PermissionManager.getInstance();
       const hasPermission = await permissionManager.hasPermission(
-        { userId: ctx.user.id, role: ctx.user.role },
-        'admin.permissions.view'
+        userPermissionContext(ctx),
+        'core.roles.manage_permissions'
       );
 
       if (!hasPermission) {
@@ -494,10 +499,9 @@ export const authRouter = router({
   assignPermissionToRole: protectedProcedure
     .input(rolePermissionSchema)
     .mutation(async ({ input, ctx }) => {
-      const permissionManager = PermissionManager.getInstance();
       const hasPermission = await permissionManager.hasPermission(
-        { userId: ctx.user.id, role: ctx.user.role },
-        'admin.roles.manage_permissions'
+        userPermissionContext(ctx),
+        'core.roles.manage_permissions'
       );
 
       if (!hasPermission) {
@@ -523,10 +527,9 @@ export const authRouter = router({
       permissionId: z.string()
     }))
     .mutation(async ({ input, ctx }) => {
-      const permissionManager = PermissionManager.getInstance();
       const hasPermission = await permissionManager.hasPermission(
-        { userId: ctx.user.id, role: ctx.user.role },
-        'admin.roles.manage_permissions'
+        userPermissionContext(ctx),
+        'core.roles.manage_permissions'
       );
 
       if (!hasPermission) {
@@ -548,10 +551,9 @@ export const authRouter = router({
   getRolePermissions: protectedProcedure
     .input(z.object({ roleId: z.string() }))
     .query(async ({ input, ctx }) => {
-      const permissionManager = PermissionManager.getInstance();
       const hasPermission = await permissionManager.hasPermission(
-        { userId: ctx.user.id, role: ctx.user.role },
-        'admin.roles.view'
+        userPermissionContext(ctx),
+        'core.roles.view'
       );
 
       if (!hasPermission) {
@@ -575,10 +577,9 @@ export const authRouter = router({
   assignRoleToUser: protectedProcedure
     .input(userRoleSchema)
     .mutation(async ({ input, ctx }) => {
-      const permissionManager = PermissionManager.getInstance();
       const hasPermission = await permissionManager.hasPermission(
-        { userId: ctx.user.id, role: ctx.user.role },
-        'admin.users.manage_roles'
+        userPermissionContext(ctx),
+        'core.users.manage_roles'
       );
 
       if (!hasPermission) {
@@ -603,10 +604,9 @@ export const authRouter = router({
       tenantId: z.string().optional()
     }))
     .mutation(async ({ input, ctx }) => {
-      const permissionManager = PermissionManager.getInstance();
       const hasPermission = await permissionManager.hasPermission(
-        { userId: ctx.user.id, role: ctx.user.role },
-        'admin.users.manage_roles'
+        userPermissionContext(ctx),
+        'core.users.manage_roles'
       );
 
       if (!hasPermission) {
@@ -635,10 +635,9 @@ export const authRouter = router({
       tenantId: z.string().optional()
     }))
     .query(async ({ input, ctx }) => {
-      const permissionManager = PermissionManager.getInstance();
       const hasPermission = await permissionManager.hasPermission(
-        { userId: ctx.user.id, role: ctx.user.role },
-        'admin.users.view_roles'
+        userPermissionContext(ctx),
+        'core.roles.view'
       );
 
       if (!hasPermission) {
@@ -678,13 +677,8 @@ export const authRouter = router({
       }).optional()
     }))
     .query(async ({ input, ctx }) => {
-      const permissionManager = PermissionManager.getInstance();
       const result = await permissionManager.hasPermission(
-        {
-          userId: ctx.user.id,
-          role: ctx.user.role,
-          tenantId: ctx.user.tenantId
-        },
+        userPermissionContext(ctx),
         input.permissionId,
         input.resourceContext
       );
@@ -707,16 +701,11 @@ export const authRouter = router({
       }))
     }))
     .query(async ({ input, ctx }) => {
-      const permissionManager = PermissionManager.getInstance();
       const results: Record<string, { granted: boolean }> = {};
 
       for (const request of input.requests) {
         const result = await permissionManager.hasPermission(
-          {
-            userId: ctx.user.id,
-            role: ctx.user.role,
-            tenantId: ctx.user.tenantId
-          },
+          userPermissionContext(ctx),
           request.permissionId,
           request.resourceContext
         );

@@ -1,19 +1,19 @@
 # Panel1 Migration Roadmap
 
-> Last updated: March 21, 2026
+> Last updated: March 24, 2026
 > Breaking changes: allowed (no public release yet)
-> Sources: ARCHITECTURE.md, domain-model-report, modularity-analysis, cleanup-map, types-architecture spec, deep-architecture-research, claude-01, gpt-001
+> Architecture reference: [`ARCHITECTURE.md`](../ARCHITECTURE.md) (authoritative, root-level)
 
 ---
 
 ## Progress Tracker
 
-| Phase | Progress | Blocking Issues |
-|-------|----------|-----------------|
+| Phase | Progress | Next Action |
+|-------|----------|-------------|
 | **Phase 0** | ✅ 100% | — |
-| **Phase 1** | 🟡 25% (1 of 8) | 1.3, 1.4 block module jobs |
-| **Phase 2** | ⏸️ 0% | Blocked by 1.3-1.5 |
-| **Phase 3-6** | ⏸️ 0% | Blocked by Phase 2 |
+| **Phase 1** | ✅ 100% | — |
+| **Phase 2** | ✅ ~100% | 2.2 audit backend + 2.5 integration tests done; Phase 3 Revenue Path next |
+| **Phase 3–6** | 🔄 ~15% | 3.1 catalog module + REST + web rewire done; 3.2–3.6 next |
 
 ---
 
@@ -21,88 +21,20 @@
 
 | Component | Status |
 |-----------|--------|
-| **Database** | 53 tables across 12 domains. Monolithic barrel (`db/schema/index.ts`) with duplicate DB connection. |
-| **`packages/core`** | Loader, services, filters work. Auth/tenant/permission middleware done. EventBus in-memory only (42 LOC). JobScheduler is a dead stub (22 LOC). Infra services not yet moved. |
-| **`packages/types`** | Exists but needs slimming — should be framework-only contracts. Module service interfaces should move to each module's `types.ts`. |
-| **`modules/support`** | 22 Hono endpoints, 9 tables, ~85% backend. **Auth wired** via global middleware. No UI dir. Jobs stubbed (scheduler doesn't execute). SLA metrics stubbed. |
-| **`modules/audit`** | 9 Hono endpoints, 3 tables, ~80% backend. **Auth wired** via global middleware. No UI dir. Export processing missing. Cleanup job stubbed. |
-| **`apps/api`** | Express + tRPC (20 routers). Hono bridged via Express adapter. Two parallel event systems (legacy BullMQ + core in-memory). Module routes now have auth via global Hono middleware. |
-| **`apps/web`** | Hardcoded routes, tRPC client. Support/audit pages call dead tRPC endpoints. Old plugin UI system is stubs. |
-| **Permissions** | Three incompatible naming conventions. Module permissions declared. Auth middleware uses legacy `PermissionManager` with legacy names. |
-| **Obsolete packages** | ✅ Removed: `plugin-sdk`, `plugin-cli`, `shared-types`. |
-| **Dead code** | ✅ Cleaned: obsolete plugins, test scripts, outdated docs. |
+| **Database** | Single connection pool (`max: 10`). Schema barrel is pure re-exports. ✅ |
+| **`packages/core`** | Loader, services, filters, events (BullMQ + outbox), jobs (BullMQ + cron fallback), middleware (auth/tenant/perm), errors, logger, email, encryption, resilience — all present. `createEmailService()` / `createEncryptionService()` factories (no singletons in core). `ctx.email`, `ctx.encryption`, `ctx.retry` all wired via `hostInfra`. |
+| **`packages/types`** | `ModuleContext` has `email?: EmailTransport`, `encryption?: EncryptionPort`, `retry?: RetryPort`. `ModuleJobOptions` includes `timeout`. |
+| **`modules/audit`** | 9 Hono endpoints, 3 tables. JSON/CSV exports on disk, download route, weekly `audit-cleanup` job (`runWeeklyMaintenance`). |
+| **`modules/support`** | 22 Hono endpoints, 9 tables. **2.1:** SLA metrics + stats grouping + escalation + stale-close crons implemented. Legacy `apps/api` support paths already absent (no extra delete). |
+| **`apps/api`** | Express + tRPC + Hono. **1.7 done:** legacy `EventService` forwards to core `EventBus`; `EventProcessor` + legacy `JobScheduler` removed; operational Bull queues in `OperationalQueues.ts`; legacy crons registered on core `JobScheduler` via `legacyBridge.ts`. `JobProcessor` + renewal/provisioning workers retained. |
+| **`apps/web`** | Hardcoded routes, tRPC client. Support pages rewired to REST (`supportApi`), audit pages rewired to REST (`auditApi`). `AuditLogger` uses REST. Remaining pages still tRPC. |
+| **Permissions** | Canonical `{module}.{resource}.{action}`. `PermissionManager` loads roles from DB (async `getAvailableRoles()`), no hardcoded permission list. `seedModulePermissionsFromDefinitions()` upserts module-declared perms after boot + `clearCache()`. `migrate-permissions.ts` script exists for legacy renames. |
 
 ---
 
-## Roadmap Overview
+## Phase 0: Safe Cleanup ✅ COMPLETE
 
-```
-Phase 0  Safe Cleanup (dead code, stale files) .. 1 day
-Phase 1  Harden Module Platform ................ 2-4 weeks
-Phase 2  Ship Support & Audit E2E .............. 2-3 weeks
-Phase 3  Revenue Path (5 modules) .............. 6-10 weeks
-Phase 4  Secondary Modules ..................... 3-5 weeks
-Phase 5  Frontend Shell + Final Cleanup ........ 3-4 weeks
-Phase 6  Quality & Release Readiness ........... ongoing
-```
-
----
-
-## Phase 0: Safe Cleanup
-
-Goal: remove dead code and stale files. Zero risk — none of this code is referenced by anything live.
-
-### Issue 0.1: Delete Obsolete Packages
-
-| Path | Reason |
-|------|--------|
-| `packages/plugin-sdk/` | Replaced by `@panel1/core` `defineModule()` contract |
-| `packages/plugin-cli/` | CLI scaffolding for old plugin SDK |
-| `packages/shared-types/` | Replaced by `packages/types/` |
-
-- [x] Delete all three directories *(already absent in repo)*
-- [x] Remove from `package.json` workspaces *(dropped `plugins/*`; packages not in tree)*
-- [x] Remove any imports referencing these packages *(AdminDomains → local types)*
-
-### Issue 0.2: Delete Dead Plugin Systems & Examples
-
-| Path | Reason |
-|------|--------|
-| `src/lib/plugins/` (root-level) | Stale duplicate of `apps/api/src/lib/plugins/` |
-| `plugins/example-admin-ui-plugin/` | Uses old `createPlugin()` SDK |
-| `plugins/example-analytics-plugin/` | Uses old `createPlugin()` SDK |
-| `apps/web/src/lib/marketplace/MarketplaceManager.ts` | 7KB unused marketplace code |
-
-- [x] Delete all listed paths *(root `src/` / example plugins N/A; marketplace file removed; stub inlined in AdminPlugins)*
-- [x] Verify no imports break
-
-### Issue 0.3: Delete Stale Files
-
-| Path | Reason |
-|------|--------|
-| `dump.rdb` | Redis dump committed to repo |
-| `apps/api/tsconfig.tsbuildinfo` | Build artifact |
-| `docs/TECHNICAL_DEBT.md` | Empty file (1 byte) |
-| `apps/api/src/modules/billing/` | Abandoned module extraction attempt, conflicts with `lib/payments/` |
-| `apps/api/src/scripts/test-*.ts` (7 files) | Manual test scripts, not automated tests |
-
-- [x] Delete all listed paths *(not present; removed dead `NotificationPlugin` example; dropped broken npm scripts for missing scripts)*
-- [x] Add `dump.rdb` and `*.tsbuildinfo` to `.gitignore` *(already present)*
-
-### Issue 0.4: Delete Outdated Docs
-
-| Path | Reason |
-|------|--------|
-| `docs/ARCHITECTURE.md` | Old doc contradicting root `ARCHITECTURE.md`. Says "tRPC", "pnpm", "Shadcn UI" |
-| `docs/API_STANDARDS.md` | Written for tRPC era |
-| `docs/PLUGIN_DEVELOPMENT.md` | Written for old SDK plugin system |
-| `docs/RELEASE_CHECKLIST.md` | References old structure |
-| `docs/SECURITY.md` | Partially valid but references old architecture |
-| `docs/README.md` | Old docs readme |
-| `docs/plugins/` | Plugin docs for old system |
-
-- [x] Delete all listed paths *(already absent; `docs/` holds roadmap + planning notes)*
-- [x] Keep `docs/` folder for new docs (this roadmap, etc.)
+Obsolete packages, dead plugin systems, stale files, outdated docs — all cleaned.
 
 ---
 
@@ -112,291 +44,133 @@ Goal: make `@panel1/core` production-capable before migrating revenue-critical d
 
 ### Issue 1.1: Shared Hono Auth/Tenant/Permission Middleware ✅ COMPLETE
 
-**Why first**: Module routes are completely unprotected. Support and audit trust client-supplied `tenantId`/`userId` headers with zero verification.
+All middleware created and wired to `/api/*` routes. Tests passing.
 
-**Completed March 2026** — All middleware created and wired to `/api/*` routes.
-
-**Tasks**:
-- [x] Create `packages/core/src/middleware/auth.ts` — `createBearerAuthMiddleware()`
-- [x] Create `packages/core/src/middleware/requirePermission.ts` — factory with OR semantics
-- [x] Create `packages/core/src/middleware/tenant.ts` — `createTenantContextMiddleware()`
-- [x] Create `packages/core/src/middleware/public.ts` — `publicRoute()` escape hatch
-- [x] Export all middleware from `packages/core/src/index.ts`
-- [x] Update `apps/api/src/index.ts` to apply auth middleware globally to Hono app
-- [x] Define Hono context type augmentation in `packages/core/src/hono-env.d.ts`
-- [x] Write tests in `packages/core/src/__tests__/middleware.test.ts`
-
-**Implementation details**:
-- `apps/api/src/hono/security.ts` — wires middleware to `PermissionManager.hasPermission()` and `getSessionByToken()`
-- Global middleware applied: `apiBearerAuthMiddleware` + `apiTenantMiddleware` on all `/api/*`
-- `requirePermission` factory passed to `bootModules()` for per-module use
-
-**Depends on**: nothing
-**Blocks**: ~~every module route is insecure without this~~ RESOLVED
+- `packages/core/src/middleware/` — `auth.ts`, `tenant.ts`, `requirePermission.ts`, `public.ts`
+- `apps/api/src/hono/security.ts` — wires to `PermissionManager` + `getSessionByToken()`
 
 ---
 
-### Issue 1.2: Unify Permission Naming
+### Issue 1.2: Unify Permission Naming ✅ COMPLETE
 
-**Why**: Three incompatible conventions. Must settle on one before building enforcement middleware.
-
-**Current conventions**:
-
-| Where | Convention | Example |
-|-------|-----------|---------|
-| `lib/auth/PermissionManager.initializePermissions()` | `resource.action` | `client.create`, `invoice.read_own` |
-| `scripts/seed-rbac-data.ts` | `admin.resource.action` / `client.resource.action` | `admin.clients.view`, `client.support.tickets.create` |
-| `defineModule({ permissions })` | `module.resource.action` | `support.tickets.view`, `audit.export` |
-
-**Decision**: adopt `{module}.{resource}.{action}` as canonical. No backward compat needed.
-
-**Tasks**:
-- [ ] Document canonical permission convention in `ARCHITECTURE.md`: `{module}.{resource}.{action}`
-  - Core/RBAC permissions: `core.users.view`, `core.clients.manage`, `core.tenants.manage`
-  - Module permissions: `support.tickets.view`, `billing.invoices.create`, `audit.logs.export`
-  - Standard actions: `view`, `create`, `update`, `delete`, `manage` (= all CRUD)
-- [ ] Map all ~40 legacy permissions to canonical names (create a mapping table in the issue)
-- [ ] Rewrite `seed-rbac-data.ts` to use canonical names
-- [ ] Update `PermissionManager` to drop the hardcoded in-memory permission list (`initializePermissions()`)
-  - Keep only the DB-backed `loadPermissions()` path
-  - Permissions are seeded to DB, loaded at runtime, cached with TTL
-- [ ] Update module `defineModule({ permissions })` declarations — verify support (10) and audit (3) use canonical form
-- [ ] Update all frontend `withPermission()` HOC calls in `apps/web/` to use canonical names
-- [ ] Wire module-declared permissions into the DB seed: during `bootModules()`, collect all module `permissions` arrays and ensure they exist in the `permissions` table
-- [ ] Write migration script or seed update that drops old permission rows and inserts new canonical ones
-
-**Depends on**: nothing
-**Blocks**: 1.1 (requirePermission middleware checks these names)
+- [x] Convention documented in `ARCHITECTURE.md`: `{module}.{resource}.{action}`
+- [x] `seed-rbac-data.ts` rewritten with canonical names (`core.dashboard.view`, `clients.clients.view`, `billing.invoices.view`, etc.)
+- [x] Module `defineModule({ permissions })` use canonical form (support: 11 perms incl. `support.dashboard.view`, audit: 3)
+- [x] `PermissionManager.getAvailableRoles()` async, reads from `roles` table (no hardcoded enum)
+- [x] `PermissionManager.clearCache()` — cache invalidation after seeding
+- [x] `initializePermissions()` hardcoded list removed
+- [x] `seedModulePermissionsFromDefinitions()` in `apps/api/src/lib/permissions/` — upserts module-declared perms after `bootModules()`
+- [x] Boot sequence: `bootModules()` → `seedModulePermissionsFromDefinitions(moduleDefs)` → `permissionManager.clearCache()`
+- [x] `apps/api/src/scripts/migrate-permissions.ts` — legacy name → canonical renames (FK-safe via `permissions.id`)
+- [x] Frontend `AdminRoutes` uses canonical `permissionId`s
+- [x] `permissions` tRPC router updated — all `getAvailableRoles` usages await async; `getRoleDescription` includes `SUPER_ADMIN`
 
 ---
 
-### Issue 1.3: BullMQ-Backed EventBus
+### Issue 1.3: BullMQ-Backed EventBus ✅ COMPLETE
 
-**Why**: Core EventBus is in-memory `Map<string, handler[]>` (42 LOC). Events lost on crash. Legacy `lib/events/EventService.ts` (217 LOC) already does BullMQ + Redis. Two parallel event systems running — must consolidate into one production-grade system.
-
-**Current state**:
-- `packages/core/src/events.ts`: In-memory pub/sub. `persistEvent` callback hook exists but is never used. `Promise.allSettled` dispatch. No BullMQ despite it being in `package.json` deps.
-- `apps/api/src/lib/events/EventService.ts`: BullMQ queue on Redis. `emit`/`emitBatch`/`getStats`/`pause`/`resume`/`cleanOldJobs`. Default 3 retries with exponential backoff.
-- Legacy `EventProcessor`: BullMQ worker on `events` queue. Routes events by prefix (`subscription.*`, `component.*`, `provisioning.*`, `billing.*`). Supports registering per-event handlers.
-
-**Tasks**:
-- [ ] Rewrite `packages/core/src/events.ts`:
-  - Keep the `on(event, handler)` / `emit(event, payload)` API unchanged
-  - Add `off(event, handler)` for unsubscribe
-  - Persist events to DB table before dispatch (Kill Bill pattern):
-    - `events` table: `id`, `eventName`, `payload` (jsonb), `status` (pending/processing/completed/failed/dead), `createdAt`, `processedAt`, `attempts`, `lastError`, `tenantId`
-    - Events written in same DB transaction as the triggering operation when possible
-  - Create BullMQ `Queue` for async dispatch
-  - Create BullMQ `Worker` that:
-    - Dequeues events
-    - Calls all registered handlers via `Promise.allSettled`
-    - Updates event status in DB
-    - Retries failed handlers with exponential backoff (configurable per-event-type)
-  - Dead-letter: after max retries, mark event as `dead` in DB (queryable for debugging)
-  - Accept `EventBusOptions`: `{ redisUrl, maxRetries, backoffMs, concurrency, persistEvent? }`
-- [ ] Add `start()` / `stop()` lifecycle methods
-  - `start()`: creates BullMQ Worker, begins processing
-  - `stop()`: gracefully drains in-flight events, closes Worker and Queue
-- [ ] Add `getStats()` returning: pending count, processing count, failed count, dead count, events/minute
-- [ ] Update `loader.ts` (`bootModules`) to:
-  - Pass Redis config to EventBus constructor
-  - Call `eventBus.start()` after all module `setup()` calls complete
-  - Call `eventBus.stop()` during shutdown
-- [ ] Add event schema to core (Drizzle table definition for `events`)
-- [ ] Write integration tests:
-  - emit → persist → worker processes → handler called
-  - handler throws → retry → eventually succeeds
-  - handler permanently fails → moves to dead-letter → queryable
-  - stop() during processing → drains cleanly
-
-**Depends on**: nothing
-**Blocks**: 1.7 (legacy event system retirement)
+`packages/core/src/events.ts` — 254 LOC, production-grade:
+- BullMQ Queue + Worker with configurable concurrency, retries, exponential backoff
+- `EventOutboxPort` interface for durable DB persistence (Kill Bill pattern)
+- `on()` / `off()` / `emit()` / `start()` / `stop()` / `getStats()`
+- In-memory fallback when Redis unavailable
+- Strict/lenient handler modes
+- `apps/api/src/lib/core/eventOutbox.ts` wires outbox to Drizzle
+- Tests: `packages/core/src/__tests__/events.test.ts`
 
 ---
 
-### Issue 1.4: BullMQ-Backed JobScheduler
+### Issue 1.4: BullMQ-Backed JobScheduler ✅ COMPLETE
 
-**Why**: Core `JobScheduler` is a dead stub (22 LOC — `register`, `list`, `clear`). Jobs are registered but never execute. Legacy `lib/jobs/JobScheduler.ts` (441 LOC) has full BullMQ + `node-cron` integration. Module jobs (support: 2, audit: 1) are registered but never fire.
-
-**Current legacy job infrastructure**:
-- `lib/jobs/JobScheduler.ts`: BullMQ queues per job type, `node-cron` for scheduling, DB job records in `scheduled_jobs` table, retry logic, queue stats
-- `lib/jobs/JobProcessor.ts`: BullMQ Workers for subscription renewal (concurrency 5), invoice gen (3), payment retry (3), dunning (2)
-- 7 provisioning queues via `ProvisioningManager`
-- Cron schedules: daily renewal check, hourly payment retry, 6-hourly dunning, 30-min scheduled job sweep
-
-**Tasks**:
-- [ ] Rewrite `packages/core/src/jobs.ts`:
-  - Keep `register(name, cron, handler, moduleName)` API
-  - Add `JobSchedulerOptions`: `{ redisUrl, defaultRetries, defaultBackoff }`
-  - On `start()`:
-    - For each registered job, create a BullMQ repeatable job using the `cron` expression
-    - Create a BullMQ `Worker` that routes jobs to their registered `handler` function
-    - Track job execution: last run time, next run time, success/failure count, last error
-  - On `stop()`:
-    - Remove repeatable job schedules
-    - Gracefully drain Worker
-    - Close Queue
-  - Support per-job config via extended `ctx.job()` signature:
-    ```
-    ctx.job(name, cron, handler, { maxRetries?, backoff?, timeout? })
-    ```
-  - Add `runNow(jobName)` method for manual trigger (admin "run now" button)
-  - Add `listJobs()` returning all registered jobs with their status and last/next run times
-- [ ] Update `loader.ts`:
-  - Pass Redis config to JobScheduler constructor
-  - Call `jobScheduler.start()` after all module `setup()` calls
-  - Call `jobScheduler.stop()` during shutdown
-- [ ] Write tests:
-  - register job → start → cron fires → handler called
-  - handler throws → retry with backoff
-  - `runNow()` triggers immediate execution
-  - `stop()` drains cleanly
-  - `listJobs()` returns correct status
-
-**Depends on**: nothing
-**Blocks**: 2.1 (support jobs), 2.2 (audit jobs), 1.7 (legacy job retirement)
+`packages/core/src/jobs.ts` — 301 LOC, production-grade:
+- BullMQ repeatables for cron, `node-cron` fallback
+- `register()` / `start()` / `stop()` / `runNow()` / `listJobs()`
+- Per-job `maxRetries`, `backoffMs`, `timeout` options
+- Execution metrics (success/failure counts, last run, next run, last error)
+- Tests: `packages/core/src/__tests__/jobs.test.ts`
 
 ---
 
-### Issue 1.5: Move Infrastructure Services to Core
+### Issue 1.5: Move Infrastructure Services to Core ✅ COMPLETE
 
-**Why**: Real implementations exist in `apps/api/src/lib/` but modules can't access them. `ctx.logger` is bare `console.*`, `ctx.email` is undefined.
+All services in `packages/core/src/`, factory-based (no singletons in core):
+- [x] `errors.ts` — `Panel1Error` base + concrete error types
+- [x] `logger.ts` — structured JSON, `child()` scoping, `createModuleLogger()` wired in context
+- [x] `email.ts` — nodemailer wrapper, batch, templates + `createEmailService()` factory
+- [x] `encryption.ts` — AES-256-GCM + `createEncryptionService()` factory
+- [x] `resilience.ts` — `RetryManager` (retry + circuit breaker with preset configs)
+- [x] `@panel1/types`: `EncryptionPort`, `RetryPort`, `RetryConfig` interfaces on `ModuleContext`
+- [x] `BootOptions.hostInfra` — `{ email, encryption, retry }` forwarded to every module context
+- [x] `apps/api/src/index.ts`: `initializeEmailService()` before boot; `hostInfra` wires SMTP adapter, `encryptionService`, `RetryManager`
+- [x] `apps/api/src/lib/email/EmailService.ts` + `lib/security/EncryptionService.ts` — thin re-exports using `create*()` from core
 
-**Services to move** (all are good quality, production-ready code):
-
-| Service | Source | Size | What it does |
-|---------|--------|------|-------------|
-| Error types | `lib/errors/index.ts` | 5KB | `Panel1Error` base + 11 concrete errors (Validation, Auth, NotFound, Payment, Provisioning, etc.) with correlationId, context, retry flags |
-| Logger | `lib/logging/Logger.ts` | 4KB | Structured JSON logging, log levels, `child()` for scoped loggers, `logOperation()` timing helper, `Panel1Error` awareness |
-| EmailService | `lib/email/EmailService.ts` + `index.ts` | 9KB | Nodemailer wrapper, batch send, mustache templates, health check, EventEmitter |
-| EncryptionService | `lib/security/EncryptionService.ts` | 5KB | AES-256-GCM, encrypt/decrypt/isEncrypted, key generation |
-| RetryManager | `lib/resilience/RetryManager.ts` | 10KB | Exponential backoff with jitter, circuit breaker (CLOSED/OPEN/HALF_OPEN), pre-built configs for payment/provisioning/DB |
-
-**Tasks**:
-- [ ] Move `lib/errors/index.ts` → `packages/core/src/errors.ts`
-  - No changes needed — pure classes, no dependencies
-- [ ] Move `lib/logging/Logger.ts` → `packages/core/src/logger.ts`
-  - Remove singleton pattern, make constructor-based
-  - Wire into `createModuleContext()`: each module gets a child logger prefixed `[module-name]`
-  - Replace current `console.*` stub in `context.ts`
-- [ ] Move `lib/email/EmailService.ts` → `packages/core/src/email.ts`
-  - Remove singleton pattern
-  - Accept config via `BootOptions` (SMTP host, port, from, etc.)
-  - Wire into `createModuleContext()` so `ctx.email` is defined
-- [ ] Move `lib/security/EncryptionService.ts` → `packages/core/src/encryption.ts`
-  - Remove singleton pattern
-  - Expose via `ctx.encryption` on ModuleContext
-- [ ] Move `lib/resilience/RetryManager.ts` → `packages/core/src/resilience.ts`
-  - Remove singleton pattern
-  - Expose via `ctx.retry` on ModuleContext
-- [ ] Update `@panel1/types` `ModuleContext` interface to include `email`, `encryption`, `retry` properties
-- [ ] Update `packages/core/src/context.ts` to inject all services
-- [ ] Update `packages/core/src/index.ts` barrel exports
-- [ ] Delete original files from `apps/api/src/lib/` (errors, logging, email, security, resilience)
-- [ ] Update remaining imports in `apps/api/` that reference old paths
-- [ ] Verify existing module code (support/audit) still compiles
-
-**Depends on**: nothing
-**Blocks**: 2.1, 2.2 (modules need real logger, email, errors)
+**Deferred cleanup** (low priority, does not block anything):
+- [ ] Delete duplicate wrappers under `apps/api/src/lib/` (errors, logging, etc.) after full import audit
+- [ ] Point all remaining `apps/api/` imports at `@panel1/core` directly
 
 ---
 
-### Issue 1.6: Module Boot Lifecycle Hardening
+### Issue 1.6: Module Boot Lifecycle Hardening ✅ COMPLETE
 
-**Why**: Current boot has no error isolation, no graceful shutdown, no health checks. One failing module aborts the entire system.
-
-**Current state**:
-- `bootModules()` iterates modules calling `setup()` — any throw aborts boot
-- No `shutdown()` — only `DbManager.close()` exists
-- `apps/api/src/index.ts` has ad-hoc shutdown: clears event bus, closes DB, stops legacy event processor + job processor separately
-- No per-module health reporting
-- `defineModule.ui` is ignored during boot — declarations never collected
-- No optional `teardown()` hook on modules
-
-**Tasks**:
-- [ ] Add try/catch per module `setup()`:
-  - Log error with the new Logger
-  - Mark module as `failed` in boot result
-  - Continue booting remaining modules (skip those that depend on the failed module)
-- [ ] Add `BootResult.failedModules: Array<{ name: string, error: Error }>` field
-- [ ] Add `BootResult.moduleUi: Map<string, ModuleUI>` collecting all `ui` declarations (needed for Phase 5 frontend shell)
-- [ ] Add optional `teardown?: () => Promise<void>` to `ModuleDefinition`
-- [ ] Create `shutdown()` function in loader that:
-  1. Calls `jobScheduler.stop()` (stop accepting new jobs)
-  2. Calls `eventBus.stop()` (drain in-flight events)
-  3. Calls each module's `teardown()` in reverse boot order
-  4. Calls `dbManager.close()`
-  5. Resolves when everything is drained
-- [ ] Add `health()` function returning per-module status:
-  - `booted` / `failed` / `degraded`
-  - Include event bus stats (pending, processing, failed)
-  - Include job scheduler stats (active jobs, failed jobs)
-- [ ] Update `apps/api/src/index.ts` shutdown handlers to use the new `shutdown()` function, removing all ad-hoc cleanup code
-- [ ] Write tests:
-  - Module A fails during setup → Module B (no dep on A) still boots
-  - Module C depends on failed Module A → Module C skipped with clear error
-  - `shutdown()` drains event bus and job scheduler before closing DB
-  - `health()` returns correct status for booted, failed, and degraded modules
-
-**Depends on**: 1.3, 1.4 (shutdown needs to stop event bus and job scheduler)
+`packages/core/src/loader.ts`:
+- [x] Topological sort with cycle detection
+- [x] Per-module try/catch — failed module doesn't crash boot
+- [x] `failedModules` array in `BootResult`, dependent modules skipped
+- [x] `moduleUi` map collected during boot
+- [x] Optional `teardown()` hook on `ModuleDefinition`
+- [x] `shutdown()` — jobs → events → teardowns (reverse order) → DB close
+- [x] `health()` — per-module status + event stats + job stats
+- [x] SIGTERM/SIGINT handlers in `apps/api/src/index.ts`
+- [x] Tests: `packages/core/src/__tests__/loader.test.ts`
 
 ---
 
-### Issue 1.7: Bridge and Retire Legacy Event/Job Systems
+### Issue 1.7: Bridge and Retire Legacy Event/Job Systems ✅ COMPLETE
 
-**Why**: Two parallel event buses + two parallel job schedulers = confusion and duplicate processing.
+**Why**: Dual event buses + dual job schedulers running simultaneously. Consolidated onto core.
 
-**Current dual systems**:
-- Legacy: `EventService` (BullMQ) + `EventProcessor` (Worker routing by event prefix) + `JobProcessor` (Workers for 7+ queues) + `JobScheduler` (cron schedules)
-- Legacy event routing: `subscription.*` → SubscriptionRenewalProcessor, `component.*` → ComponentLifecycleService, `provisioning.*` → ProvisioningProcessor, `billing.*` → InvoiceEventHandler/PaymentEventHandler
-- Modular: `@panel1/core` EventBus + JobScheduler — now BullMQ-backed after 1.3/1.4
+**Delivered**:
+- [x] `apps/api/src/lib/core/appRuntime.ts` — `setApplicationEventBus` / `getApplicationEventBus` for legacy `emit` facade
+- [x] `apps/api/src/lib/core/legacyBridge.ts` — before core `JobScheduler.start()`: init `OperationalQueues`, `jobProcessor.initialize()`, `PaymentEventHandler.attachToEventBus()`, plugin log handlers, register legacy crons on **core** `JobScheduler`
+- [x] `packages/core` `bootModules({ beforeJobSchedulerStart })` hook
+- [x] `EventService` — thin forwarder to core `EventBus` (no second BullMQ `events` queue)
+- [x] Removed: `lib/jobs/JobScheduler.ts`, `lib/jobs/processors/EventProcessor.ts`
+- [x] Renamed/replaced with: `lib/jobs/OperationalQueues.ts` (subscription/invoice/payment/dunning/provisioning Bull queues; **no** duplicate node-cron — crons bridged to core)
+- [x] **Kept**: `JobProcessor`, `SubscriptionRenewalProcessor`, provisioning workers
+- [x] `index.ts` — dropped `eventProcessor`, duplicate `jobProcessor` / `PaymentEventHandler` / `CatalogEventHandlers` init (bridge handles)
 
-**Tasks**:
-- [ ] Map every legacy event handler to determine which are still needed:
-  - `subscription.*` handlers → needed until Phase 3 (subscriptions module migration)
-  - `component.*` handlers → needed until Phase 3 (catalog/provisioning migration)
-  - `provisioning.*` handlers → needed until Phase 3 (provisioning migration)
-  - `billing.*` handlers → needed until Phase 3 (billing migration)
-- [ ] Create temporary bridge: register legacy event handlers as core EventBus subscribers via `ctx.on()` in the boot sequence
-  - This means legacy processors still run, but triggered through the new event bus instead of the old one
-- [ ] Remove from `apps/api/src/index.ts`:
-  - `eventProcessor.start()`
-  - `eventService` initialization
-  - `jobProcessor.initialize()`
-  - `CatalogEventHandlers.initialize()`
-  - `PaymentEventHandler.initialize()`
-- [ ] Delete legacy files:
-  - `lib/events/EventService.ts`
-  - `lib/jobs/JobProcessor.ts`
-  - `lib/jobs/JobScheduler.ts`
-  - `lib/jobs/processors/EventProcessor.ts`
-  - `lib/jobs/processors/SubscriptionRenewalProcessor.ts`
-  - `lib/jobs/processors/ProvisioningProcessor.ts`
-  - `lib/jobs/processors/SupportProcessor.ts`
-- [ ] Verify no events are lost: compare legacy event routes with new bridge handlers
-- [ ] Update imports in any file that references deleted modules
-
-**Depends on**: 1.3, 1.4 (new systems must be working first)
-**Blocks**: Phase 3 (clean module migration without legacy interference)
+**Depends on**: 1.3 ✅, 1.4 ✅, 1.5 ✅, 1.6 ✅
 
 ---
 
-### Issue 1.8: Fix Duplicate DB Connection
+### Issue 1.8: Fix Duplicate DB Connection ✅ COMPLETE
 
-**Why**: `apps/api/src/db/schema/index.ts` creates a second Drizzle `db` instance alongside `apps/api/src/db/index.ts`. Some code imports from one, some from the other.
+- [x] `apps/api/src/db/index.ts` — single connection, `max: 10`
+- [x] `apps/api/src/db/schema/index.ts` — pure re-export barrel with warning comment
+- [x] No code imports `db` from `db/schema/`
 
-**Current state (verified March 21)**:
-- `db/index.ts` lines 19-22: creates `drizzle(client, { schema })`
-- `db/schema/index.ts` lines 41-50: creates ANOTHER `drizzle(client, { schema: {...} })`
-- Both export `db` — import confusion confirmed
+---
 
-**Tasks**:
-- [ ] Remove the DB connection from `db/schema/index.ts` — keep it as a pure schema barrel export only
-- [ ] Ensure all code imports `db` from `db/index.ts` (or from core's `DbManager` for module code)
-- [ ] Verify no double-connection at runtime
+### Phase 1 Dependency Graph
 
-**Depends on**: nothing
-**Effort**: Small (1-2 hours)
+```
+1.1 Auth Middleware ─────────────────────────────────────────  ✅ DONE
+1.2 Permission Naming ───────────────────────────────────────  ✅ DONE
+1.3 EventBus (BullMQ) ──────────────────────────────────────  ✅ DONE
+1.4 JobScheduler (BullMQ) ──────────────────────────────────  ✅ DONE
+1.5 Infra Services ─────────────────────────────────────────  ✅ DONE
+1.6 Boot Lifecycle ─────────────────────────────────────────  ✅ DONE
+1.8 Fix Duplicate DB ───────────────────────────────────────  ✅ DONE
+                         │
+                         ▼
+              1.7 Bridge & Retire Legacy ──────────────────  ✅ DONE
+                         │
+           ┌─────────────┼─────────────┐
+           ▼             ▼             ▼
+     Support (#8)   Catalog (#9)  Domains+SSL (#10)  ←── Leaf migrations
+```
+
+**NEXT**: Phase 2 (support/audit E2E)
 
 ---
 
@@ -404,390 +178,145 @@ Goal: make `@panel1/core` production-capable before migrating revenue-critical d
 
 Goal: first fully credible modular slices — backend + frontend + auth + tests.
 
-### Issue 2.1: Support Module Backend Completion
+### Issue 2.1: Support Module Backend Completion ✅ COMPLETE
 
-**Current state** (22 endpoints, 9 tables):
-- Working: ticket CRUD + messages, auto-assignment (scoring algorithm), automation engine (7 action types), SLA profiles + due date calculation, KB articles (CRUD + search + view counting), categories, agents, automation rules
-- **Stubbed**: both cron jobs (escalation check every 15min, auto-close daily 2am) only `console.log`
-- **Stubbed**: `getSlaMetrics()` returns hardcoded `{ avgResponseTime: 0, ... }`
-- **Partial**: `getSupportStats()` — totals work, but `ticketsByPriority` and `ticketsByCategory` return `{}`
+**Current** (22 endpoints, 9 tables): ticket CRUD + messages, auto-assignment, automation engine, SLA profiles, KB articles, categories, agents.
 
-**Tasks**:
-- [ ] Apply auth middleware (from 1.1) to all support routes:
-  - `GET /my-tickets` — authenticated user, scoped to their `clientId`
-  - `GET /tickets`, `GET /tickets/:id`, `POST /tickets/:id/messages` — `support.tickets.view`
-  - `POST /tickets`, `PATCH /tickets/:id/status`, `POST /tickets/:id/assign` — `support.tickets.manage`
-  - `GET/POST /categories` — `support.categories.manage`
-  - `GET/POST /sla/profiles`, `GET /sla/metrics` — `support.sla.manage`
-  - `GET/POST /agents` — `support.agents.manage`
-  - `GET/POST /automation/rules` — `support.automation.manage`
-  - `GET /stats` — `support.stats.view`
-  - `GET /kb/*` — `support.kb.manage` for admin, public access for published articles
-- [ ] Implement `support-escalation-check` job (runs every 15 min):
-  - Query tickets where `firstResponseDue < now()` and `firstResponseAt IS NULL`, or `resolutionDue < now()` and `resolvedAt IS NULL`
-  - For each, look up the ticket's SLA profile escalation rules
-  - Execute escalation: reassign, change priority, add internal note, emit `support.sla.breached`
-  - Update ticket: set `escalated = true`, record escalation in metadata
-- [ ] Implement `support-auto-close-stale` job (runs daily 2am):
-  - Query tickets in `waiting_on_customer` status where `lastActivityAt < now() - configurable_days`
-  - For each: change status to `closed`, add system message "Auto-closed due to inactivity"
-  - Emit `support.ticket.closed` event
-- [ ] Fix `getSlaMetrics()` — real DB aggregation:
-  - Average first response time: `AVG(firstResponseAt - createdAt)` where `firstResponseAt IS NOT NULL`
-  - Average resolution time: `AVG(resolvedAt - createdAt)` where `resolvedAt IS NOT NULL`
-  - SLA compliance: `COUNT(firstResponseAt <= firstResponseDue) / COUNT(*)` as percentage
-  - Breach count grouped by priority
-- [ ] Fix `getSupportStats()`:
-  - `ticketsByPriority`: `SELECT priority, COUNT(*) FROM support_tickets GROUP BY priority`
-  - `ticketsByCategory`: `SELECT categoryId, COUNT(*) FROM support_tickets GROUP BY categoryId`
-- [ ] Register event subscribers in `setup()`:
-  - Optionally listen to `audit.logged` to cross-reference admin actions on tickets
-- [ ] Replace `console.*` logging with `ctx.logger` (from 1.5)
+**Remaining**:
+- [x] Implement `support-escalation-check` job (15min): query overdue tickets, execute SLA escalation rules, emit `support.sla.breached`
+- [x] Implement `support-auto-close-stale` job (daily 2am): close `WAITING_CUSTOMER` tickets past threshold (`staleTicketCloseDaysAfterLastActivity`, default 14d)
+- [x] Fix `getSlaMetrics()` — real DB aggregation (avg response time, resolution time, compliance %, breaches, at-risk)
+- [x] Fix `getSupportStats()` — `ticketsByPriority` and `ticketsByCategory` grouping
+- [x] Delete old support code from `apps/api/src/` — **already removed** in tree (no `lib/support/`, `routers/support.ts`, etc.)
+- [x] Remove from barrel files — **no support exports** in `apps/api` schema/router barrels (nothing to remove)
+- [x] Replace `console.*` with `ctx.logger` — support module uses `ctx.logger` only
 
-**Depends on**: 1.1 (auth), 1.2 (permission names), 1.4 (job execution), 1.5 (logger)
+**Depends on**: 1.2 ✅, 1.4 ✅, 1.5 ✅ — **all prerequisites met**
 
 ---
 
-### Issue 2.2: Audit Module Backend Completion
+### Issue 2.2: Audit Module Backend Completion ✅ COMPLETE
 
-**Current state** (9 endpoints, 3 tables):
-- Working: log event, query logs (multi-field filtering, pagination), resource audit trail, stats (real aggregation), export request creation (DB record only), export listing/status, filter options (distinct queries), cleanup (reads retention policies, deletes by cutoff)
-- **Missing**: export file generation — creates pending record but no worker generates the file
-- **Stubbed**: `audit-cleanup` cron job only `console.log`
+**Delivered**:
+- [x] Export file generation (JSON/CSV, disk under `AUDIT_EXPORT_DIR`, `processExportJob`, status tracking)
+- [x] `GET /exports/:id/download` (stream)
+- [x] `audit-cleanup` weekly cron → `runWeeklyMaintenance()` (retention + expired export purge)
+- [x] API email helpers use `logger` (no `console.*` in `lib/email/index.ts` send path)
 
-**Tasks**:
-- [ ] Apply auth middleware (from 1.1) to all audit routes:
-  - `GET /logs`, `GET /stats`, `GET /trail/*`, `GET /filter-options` — `audit.view`
-  - `POST /events` — service-to-service or `audit.view` (modules call this to log events)
-  - `POST /exports`, `GET /exports`, `GET /exports/:id` — `audit.export`
-  - `POST /cleanup` — `audit.cleanup`
-- [ ] Implement export file generation:
-  - Register a job via `ctx.job()` or trigger inline from `POST /exports`:
-    - Query audit logs for the requested date range, resource types, action types
-    - Generate output based on requested format:
-      - JSON: stream records to file
-      - CSV: headers + rows
-      - PDF: basic tabular report (use existing PDF patterns from `InvoicePDFService` if applicable)
-    - Store file on local filesystem (e.g., `data/exports/{exportId}.{format}`)
-    - Update `audit_log_exports` record: `status = 'completed'`, `fileUrl`, `fileSize`, `recordCount`
-    - On failure: `status = 'failed'`, store error
-    - Emit `audit.export.completed` or `audit.export.failed`
-  - Add `GET /exports/:id/download` endpoint to serve the file
-  - Set `expiresAt` on export records, add cleanup of expired export files
-- [ ] Implement `audit-cleanup` cron job (weekly Sunday 2am):
-  - Call existing `cleanupOldLogs()` (already queries retention policies, deletes by cutoff)
-  - Emit `audit.cleanup.completed` with `{ deletedCount }`
-  - Also clean up expired export files from disk
-- [ ] Add convenience for cross-module audit logging:
-  - Ensure `IAuditService` is easily callable: `ctx.service<IAuditService>('audit').logEvent(...)`
-  - Consider auto-audit Hono middleware for mutations: log all POST/PATCH/DELETE requests with before/after state
-- [ ] Replace `console.*` logging with `ctx.logger`
-
-**Depends on**: 1.1 (auth), 1.2 (permission names), 1.4 (job execution), 1.5 (logger)
+**Depends on**: 1.2 ✅, 1.4 ✅, 1.5 ✅ — **all prerequisites met**
 
 ---
 
-### Issue 2.3: Support Admin UI
+### Issue 2.3: Support Admin UI ✅ COMPLETE
 
-**Current state**:
-- `SupportDashboard.tsx` calls `trpc.support.getSupportStats.useQuery()` — **dead**, no such tRPC router exists
-- `SupportTickets.tsx` calls `trpc.support.getTickets.useQuery()` — **dead**
-- Both pages expect joined relations (`ticket.client.user.firstName`, `ticket.assignedAgent.*`) that the module API doesn't return (it returns flat IDs)
-- `SupportDashboard.tsx` uses `PluginSlot` (old stub system)
-- No `modules/support/src/ui/` directory exists
-- Three additional admin pages are placeholders in `AdminRoutes.tsx`: knowledge-base, automation, agents
+**Delivered**:
+- [x] `apps/web/src/api/supportApi.ts` — REST client (getStats, getSlaMetrics, listTickets, getTicket, createTicket, addMessage, updateTicketStatus, assignTicket, listCategories, createCategory)
+- [x] `SupportDashboard.tsx` — SLA snapshot, real stats, links to tickets & categories
+- [x] `SupportTickets.tsx` — search/filters, rows link to detail, new-ticket modal
+- [x] `SupportTicketDetail.tsx` — thread, reply/internal note, status select, auto-assign
+- [x] `SupportCategories.tsx` — list + create (name, color, description)
+- [x] `AdminRoutes.tsx` — `support/tickets/:ticketId`, `support/categories`; gated with `support.tickets.view` / `support.tickets.manage`
+- [x] `menuItems.tsx` — Support → Categories (`support.tickets.manage`)
 
-**Tasks**:
-- [ ] Create REST API client helpers for support module (plain `fetch` wrapper with auth token — orval comes in Phase 5):
-  - `supportApi.listTickets(params)` → `GET /api/support/tickets`
-  - `supportApi.getTicket(id)` → `GET /api/support/tickets/:id`
-  - `supportApi.createTicket(data)` → `POST /api/support/tickets`
-  - `supportApi.addMessage(ticketId, data)` → `POST /api/support/tickets/:id/messages`
-  - `supportApi.updateStatus(ticketId, status)` → `PATCH /api/support/tickets/:id/status`
-  - `supportApi.assignTicket(ticketId)` → `POST /api/support/tickets/:id/assign`
-  - `supportApi.getStats()` → `GET /api/support/stats`
-  - `supportApi.listCategories()` → `GET /api/support/categories`
-  - `supportApi.listAgents()` → `GET /api/support/agents`
-  - `supportApi.getSlaMetrics()` → `GET /api/support/sla/metrics`
-- [ ] Rewrite `SupportDashboard.tsx`:
-  - Fetch stats from support API
-  - Fetch recent tickets (paginated, sorted by `createdAt desc`)
-  - Show: open ticket count, avg response time, SLA compliance, tickets by priority chart
-  - Remove `PluginSlot` usage
-  - Handle loading/error/empty states properly
-- [ ] Rewrite `SupportTickets.tsx`:
-  - Paginated ticket list from support API
-  - Filter by: status, priority, category, assigned agent
-  - Search by ticket number or subject
-  - Columns: ticket number, subject, client, status, priority, assigned to, created, last activity
-  - Handle loading/error/empty states
-- [ ] Create `SupportTicketDetail.tsx`:
-  - Fetch ticket with messages from `/api/support/tickets/:id`
-  - Message thread display (internal messages styled differently)
-  - Reply form (with internal message toggle)
-  - Status change controls (dropdown or buttons)
-  - Assignment controls
-  - SLA info display (due dates, compliance status)
-  - Ticket metadata sidebar (client, category, priority, tags, created/updated dates)
-- [ ] Create `SupportCategories.tsx`:
-  - List categories from API
-  - Create/edit category form (name, description, color, icon, parent category, default assignee)
-- [ ] Update routes in `AdminRoutes.tsx`:
-  - `/admin/support` → `SupportDashboard`
-  - `/admin/support/tickets` → `SupportTickets`
-  - `/admin/support/tickets/:id` → `SupportTicketDetail`
-  - `/admin/support/categories` → `SupportCategories`
-  - Keep placeholders for `/admin/support/knowledge-base`, `/admin/support/automation`, `/admin/support/agents` (can flesh out later)
-- [ ] Update nav in `menuItems.tsx` — support section with correct paths
-- [ ] Gate all pages with `withPermission()` using canonical permission names
-
-**Depends on**: 2.1 (backend complete + authed), 1.2 (permission names)
+**Depends on**: 2.1 ✅, 1.2 ✅
 
 ---
 
-### Issue 2.4: Audit Admin UI
+### Issue 2.4: Audit Admin UI ✅ COMPLETE
 
-**Current state**:
-- `AdminAuditLogs.tsx` calls `trpc.audit.getLogs.useQuery()`, `trpc.users.list.useQuery()` — **dead**
-- `apps/web/src/lib/audit/AuditLogger.ts` calls `trpc.audit.logEvent.mutate()`, `trpc.audit.getAuditTrail.query()`, `trpc.audit.exportAuditTrail.query()` — **dead**
-- Data shape mismatch: page expects `log.user.firstName`, module returns flat `userId`
+**Delivered**:
+- [x] `apps/web/src/api/auditApi.ts` — REST client (queryLogs, getFilterOptions, getStats, logEvent, createExport, listExports, getExportStatus, waitForExportReady, downloadExportBlob)
+- [x] `apps/web/src/api/http.ts` — `fetchBlob()` for file downloads
+- [x] `AdminAuditLogs.tsx` — filters from API, resource filter, stats cards, expandable rows (metadata + old/new JSON), exports block
+- [x] `AuditLogger.ts` — REST via `auditApi.logEvent` (tRPC dropped)
+- [x] View gated with `audit.logs.view`; export UI gated with `audit.logs.export` via `<Can>`
 
-**Tasks**:
-- [ ] Create REST API client helpers for audit module:
-  - `auditApi.queryLogs(params)` → `GET /api/audit/logs`
-  - `auditApi.getStats()` → `GET /api/audit/stats`
-  - `auditApi.getTrail(resourceType, resourceId)` → `GET /api/audit/trail/:type/:id`
-  - `auditApi.getFilterOptions()` → `GET /api/audit/filter-options`
-  - `auditApi.requestExport(data)` → `POST /api/audit/exports`
-  - `auditApi.listExports()` → `GET /api/audit/exports`
-  - `auditApi.getExport(id)` → `GET /api/audit/exports/:id`
-  - `auditApi.downloadExport(id)` → `GET /api/audit/exports/:id/download`
-  - `auditApi.logEvent(data)` → `POST /api/audit/events`
-- [ ] Rewrite `AdminAuditLogs.tsx`:
-  - Fetch logs from audit API with pagination
-  - Use `/api/audit/filter-options` to populate filter dropdowns
-  - Filters: action type, resource type, date range, search
-  - Columns: timestamp, action, resource type, resource ID, user, IP address
-  - Expandable row detail showing old/new values diff
-  - Remove dependency on `trpc.users.list` — display `userId` or add user name resolution to the audit API response
-  - Handle loading/error/empty states
-- [ ] Add export section to audit page (or separate `AuditExports.tsx`):
-  - "Request Export" button → date range picker + format selector (JSON/CSV)
-  - List existing exports with status (pending/processing/completed/failed)
-  - Download link for completed exports
-- [ ] Rewrite `lib/audit/AuditLogger.ts`:
-  - Replace all tRPC calls with REST `fetch` calls to `/api/audit/events`
-  - Keep convenience API: `logAuth(action, details)`, `logDataChange(resource, id, old, new)`, `logSystem(action, details)`
-  - This utility is used by other frontend pages for client-side audit logging
-- [ ] Update routes in `AdminRoutes.tsx` — `/admin/audit-logs` → rewritten `AdminAuditLogs`
-- [ ] Gate with `withPermission('audit.view')`, export actions with `withPermission('audit.export')`
-
-**Depends on**: 2.2 (backend complete + authed), 1.2 (permission names)
+**Depends on**: 2.2 ✅, 1.2 ✅
 
 ---
 
-### Issue 2.5: Integration Tests for Support & Audit
+### Issue 2.5: Integration Tests for Support & Audit ✅ COMPLETE
 
-**Why**: First modular slices need test coverage to serve as credible reference implementations.
+**Delivered** (`apps/api/src/__tests__/integration/`):
+- [x] Shared helpers: `createTestContext()`, `createAuthenticatedRequest()`, `seedTestData()`, `deleteSeedData()`, schema probes (`supportModuleTablesExist` / `auditModuleTablesExist`)
+- [x] Support: stats, SLA metrics, automation rules list, ticket create → get → message, `support-escalation-check` job, 401/403 (CLIENT vs SUPER_ADMIN). *Skipped if support tables not migrated.*
+- [x] Audit: log event, query, JSON export + download, `audit-cleanup` job, cleanup 403, 401/403. *Requires `audit_logs` table.*
 
-**Tasks**:
-- [ ] Create shared test utilities:
-  - `createTestContext()` — sets up DB, boots core with test config, returns module context
-  - `createAuthenticatedRequest(user, method, path, body?)` — builds Request with valid Bearer token
-  - `seedTestData()` — creates tenant, admin user, client user with permissions
-  - `waitForEvent(eventName, timeout)` — helper to await async event processing
-  - `waitForJob(jobName, timeout)` — helper to await cron job execution
-- [ ] Support integration tests:
-  - **Ticket lifecycle**: create ticket → verify DB record + `support.ticket.created` event → add message → verify message stored → assign → verify assigned → change status to resolved → verify `support.ticket.resolved` event → close
-  - **Auto-assignment**: create ticket with category that has assignment rules → verify assigned to correct agent based on workload/availability/skills scoring
-  - **SLA**: create ticket with SLA profile → verify `firstResponseDue` and `resolutionDue` calculated → simulate time passing SLA → run escalation job → verify `support.sla.breached` event + escalation actions
-  - **Automation**: create automation rule (e.g., "if priority=critical then assign to agent X") → create matching ticket → verify automation action executed
-  - **KB**: create article → search by keyword → verify found → increment view count → verify count updated
-  - **Auth enforcement**: unauthenticated request → 401, user without `support.tickets.view` → 403, client can only see own tickets via `/my-tickets`
-- [ ] Audit integration tests:
-  - **Log + query**: log event → query with filters → verify in results
-  - **Resource trail**: log multiple events for same resource → query trail → verify all returned in chronological order
-  - **Stats**: log events with different action types → get stats → verify aggregation correct
-  - **Export**: request export → verify job processes → file exists on disk → download → verify content matches queried data
-  - **Cleanup**: insert logs with old timestamps + recent timestamps → run cleanup → old deleted, recent preserved → verify count
-  - **Auth enforcement**: unauthenticated → 401, user without `audit.export` → 403 on export endpoints
-
-**Depends on**: 2.1, 2.2, 2.3, 2.4
+**Depends on**: 2.1–2.4
 
 ---
 
 ## Phase 3: Revenue Path
 
-Goal: migrate 5 core business domains into vertical-slice modules. Each = full vertical slice (schema + service + Hono routes + admin UI + delete legacy tRPC router + delete legacy lib code).
-
+Goal: migrate 5 core business domains into vertical-slice modules.
 Order: catalog → billing → payments → subscriptions → provisioning (upstream → downstream).
 
-### Issue 3.1: `modules/catalog/`
-
-**Source files**: `lib/catalog/` (4 files, 48KB), `lib/components/` (2 files, 23KB), `routers/catalog.ts`, `routers/components.ts`, `routers/plans.ts`, `db/schema/catalog.ts`, `db/schema/componentProviders.ts`
-
-**Tables**: components, component_providers, products, product_components, billing_plans, plan_components (6 tables)
-
-**Services**: ProductService, ComponentDefinitionService, ComponentProviderRegistry, CatalogEventHandlers, ComponentLifecycleService, ComponentManagementService
-
-**Frontend**: CatalogDashboard, ProductsManagement, ComponentRegistrationManagement, ProductStorePage, CartPage, CheckoutPage, CheckoutSuccessPage
+### Issue 3.1: `modules/catalog/` — ✅ scaffold + Hono + REST client + legacy tRPC removed (Mar 2026)
+**Delivered**: `@panel1/mod-catalog` (`schema`, `CatalogService`, `routes.ts`, permissions seed-aligned). Host `catalogRuntime.ts` wires `ComponentProviderRegistry`, `ComponentManagementService`, `ComponentLifecycleService` after `initializeServices()`. Public storefront: `GET /api/catalog/public/products` (auth/tenant skipped for `/api/catalog/public/*`). Legacy `plans` table: `/api/catalog/legacy-plans*`. Subscribed instance ops (ex–`components` router): `/api/catalog/instances/*`. **Removed**: `routers/catalog.ts`, `components.ts`, `plans.ts`; `lib/catalog/*` except `ComponentProviderRegistry` + `catalogRuntime`; `apps/web` catalog/plans/components pages use `catalogApi.ts` + React Query. **Deferred (3.6)**: Drizzle tables still in `apps/api/src/db/schema/` (module ships parallel schema merge for relational queries).
+**Source (historical)**: was `lib/catalog/`, `lib/components/` lifecycle, three tRPC routers, `db/schema/catalog.ts` + `componentProviders.ts`.
 
 ### Issue 3.2: `modules/billing/`
-
-**Source files**: `lib/invoice/` (7 files, 37KB), `lib/dunning/` (1 file, 12KB), `routers/invoices.ts`, `db/schema/invoices.ts`, `db/schema/invoice-items.ts`, `db/schema/invoice-counters.ts`, `db/schema/dunning-attempts.ts`
-
-**Tables**: invoices, invoice_items, invoice_counters, dunning_attempts (4 tables)
-
-**Services**: InvoiceNumberService, InvoicePDFService, InvoiceEmailService, TaxCalculationService, ComponentInvoiceService, InvoiceEventHandler, DunningManager, DunningEmailService
-
-**Business flows**: invoice generation (from subscription renewal or manual), payment processing trigger, dunning campaigns (3 strategies: default/gentle/aggressive, day-offset scheduling)
-
-**Frontend**: AdminBilling, AdminInvoices, ClientInvoices
+Source: `lib/invoice/` (7 files, 37KB), `lib/dunning/` (1 file, 12KB), `routers/invoices.ts`, schema files. Tables: 4. Services: InvoiceNumberService, InvoicePDFService, TaxCalculationService, DunningManager. Frontend: AdminBilling, AdminInvoices, ClientInvoices.
 
 ### Issue 3.3: `modules/payments/`
-
-**Source files**: `lib/payments/` (7 files, 35KB), `routers/payment-gateways.ts`, `db/schema/payments.ts`, `db/schema/payment-gateways.ts`
-
-**Tables**: payments, payment_attempts, payment_gateway_configs (3 tables)
-
-**Services**: PaymentService, PaymentGatewayService, PaymentGatewayManager, PaymentEventHandler, StripeGateway
-
-**Implements**: `IPaymentGateway` interface from `@panel1/types`
-
-**Events**: `payment.initiated`, `payment.succeeded`, `payment.failed`, `payment.refunded`
-
-**Frontend**: AdminPaymentGateways
+Source: `lib/payments/` (7 files, 35KB), `routers/payment-gateways.ts`, schema files. Tables: 3. Services: PaymentService, PaymentGatewayManager, StripeGateway. Implements `IPaymentGateway`. Frontend: AdminPaymentGateways.
 
 ### Issue 3.4: `modules/subscriptions/`
-
-**Source files**: `lib/subscription/` (2 files, 45KB), `routers/subscriptions.ts`, `db/schema/subscriptions.ts`, `db/schema/subscription-components.ts`, `db/schema/subscription-state-changes.ts`
-
-**Tables**: subscriptions, subscription_components, subscribed_components, subscription_state_changes (4 tables)
-
-**Services**: SubscriptionService (state machine, renewal, cancellation, trial handling)
-
-**Cross-module events**: subscribes to `payment.succeeded` → activate, `payment.failed` → increment failures → PAST_DUE
-
-**Frontend**: AdminSubscriptions, ClientSubscriptions
+Source: `lib/subscription/` (2 files, 45KB), `routers/subscriptions.ts`, schema files. Tables: 4. Services: SubscriptionService (state machine). Cross-module: `payment.succeeded` → activate. Frontend: AdminSubscriptions, ClientSubscriptions.
 
 ### Issue 3.5: `modules/provisioning/`
-
-**Source files**: `lib/provisioning/` (4+ files, 25KB), `routers/provisioning.ts`, `db/schema/provisioning.ts`
-
-**Tables**: provisioning_providers, service_instances, provisioning_tasks (3 tables)
-
-**Services**: ProvisioningManager, CpanelPlugin, CpanelAdapter, ProvisioningProcessor
-
-**Implements**: `IProvisioner` interface from `@panel1/types`
-
-**Cross-module events**: subscribes to `subscription.activated` → provision
-
-**Frontend**: AdminProvisioning
+Source: `lib/provisioning/` (4+ files, 25KB), `routers/provisioning.ts`, schema. Tables: 3. Services: ProvisioningManager, CpanelAdapter. Implements `IProvisioner`. Cross-module: `subscription.activated` → provision. Frontend: AdminProvisioning.
 
 ### Issue 3.6: Per-Module DB Schema Ownership
-
-- Move schema files from `db/schema/*.ts` into respective `modules/*/src/schema.ts`
-- Rename tables to `{module}_tablename` convention where appropriate
-- Keep core tables (users, clients, tenants, roles, sessions, permissions) in `packages/core/` or `apps/api/`
-- Implement per-module migration runner in `DbManager`
-- Handle cross-module FKs: subscriptions→plans, invoices→subscriptions, payments→invoices+subscriptions, service_instances→subscriptions
+Move schema files from `db/schema/*.ts` into respective modules. Keep core tables in `apps/api/`. Handle cross-module FKs via service calls.
 
 ---
 
 ## Phase 4: Secondary Modules
 
 ### Issue 4.1: `modules/domains/`
-Source: `lib/domains/` (3 files, 32KB), `lib/plugins/domain/`. Tables: domains, dns_zones, dns_records, domain_operations (4). Implements `IRegistrar` from `@panel1/types`.
+Source: `lib/domains/` (3 files, 32KB), `lib/plugins/domain/`. Tables: 4. Implements `IRegistrar`.
 
 ### Issue 4.2: `modules/ssl/`
-Source: `lib/ssl/` (2 files, 22KB), `lib/plugins/ssl/`. Tables: ssl_certificates, ssl_certificate_operations, ssl_validation_records (3).
+Source: `lib/ssl/` (2 files, 22KB), `lib/plugins/ssl/`. Tables: 3.
 
 ### Issue 4.3: Enhance `modules/audit/`
-Subscribe to events from all migrated modules for automatic audit logging. Auto-audit middleware.
+Auto-audit middleware, subscribe to events from all migrated modules.
 
 ### Issue 4.4: Enhance `modules/support/`
-SLA enforcement with real escalation. Ticket automation rules. Knowledge base content management.
+SLA enforcement with real escalation, automation rules, KB content management.
 
 ---
 
 ## Phase 5: Frontend Shell + Final Cleanup
 
 ### Issue 5.1: Module Manifest Endpoint
-`GET /api/modules/manifest` — returns active modules with `ui` declarations.
+`GET /api/modules/manifest` — active modules with `ui` declarations.
 
 ### Issue 5.2: Dynamic Route + Nav Building
-Replace hardcoded `AdminRoutes.tsx` (160+ lines) and `menuItems.tsx`. Build from module manifest.
+Replace hardcoded `AdminRoutes.tsx` and `menuItems.tsx`. Build from manifest.
 
 ### Issue 5.3: Replace tRPC with orval-Generated Client
-Aggregate OpenAPI specs at `/api/docs`. Configure orval. Generate React Query hooks. Remove tRPC deps.
+Aggregate OpenAPI at `/api/docs`. Generate React Query hooks. Remove tRPC deps.
 
 ### Issue 5.4: Replace Express with Hono
-Remove Express from `apps/api`. Hono as sole HTTP server. Delete Express-to-Hono bridge hack.
+Hono as sole HTTP server. Delete Express-to-Hono bridge.
 
 ### Issue 5.5: Delete All Legacy Code
-- `apps/api/src/lib/plugins/` (internal PluginManager, BasePlugin, domain/ssl/provisioning/support sub-plugins)
-- `apps/web/src/lib/plugins/` (frontend PluginManager, PluginLoader, PluginRegistry, RouteManager, UISlotManager)
-- All remaining `apps/api/src/lib/` directories
-- All remaining `apps/api/src/routers/` tRPC routers
-- `apps/api/src/trpc/` directory
-- `apps/web/src/api/trpc.ts`, `providers/TRPCProvider.tsx`
-- `apps/web/src/lib/billing/ProrationCalculator.ts` (business logic in frontend)
-- `apps/web/src/lib/events/EventEmitter.ts`
-- `apps/web/src/pages/LandingPage.tsx` (30KB marketing page with "Built with Bolt.new")
-- Remove tRPC deps from all `package.json` files
-- Remove Express deps from `apps/api/package.json`
-- Clean up `README.md`
+All remaining `lib/`, `routers/`, `trpc/`, plugin stubs, tRPC/Express deps.
 
 ---
 
 ## Phase 6: Quality & Release Readiness
 
 ### Issue 6.1: Module Integration Test Suite
-Each module has end-to-end tests covering core workflows.
-
 ### Issue 6.2: Smoke Tests
-Sign-in → browse catalog → purchase → payment → active service → support ticket → audit trail.
-
+Sign-in → catalog → purchase → payment → active service → support ticket → audit trail.
 ### Issue 6.3: Alpha Release Checklist
-Seed data, environment setup docs, deployment guide, known limitations.
-
----
-
-## Dependency Graph
-
-```
-Phase 0 (cleanup) ──── no dependencies, safe to do anytime       ✅ DONE
-       │
-       ▼
-1.1 Auth Middleware ─────────┐                                   ✅ DONE
-1.2 Permission Naming ───────┤                                   ⏳ TODO
-1.3 EventBus (BullMQ) ───────┼── 1.6 Boot Lifecycle ──┐          ⏳ TODO ← CRITICAL
-1.4 JobScheduler (BullMQ) ───┤                         │          ⏳ TODO ← CRITICAL
-1.5 Infra Services ──────────┤   1.7 Retire Legacy ────┘          ⏳ TODO
-1.8 Fix Duplicate DB ────────┘                                    ⏳ TODO
-                              │
-                 ┌────────────┴────────────┐
-                 ▼                         ▼
-           2.1 Support Backend       2.2 Audit Backend            BLOCKED
-                 │                         │
-                 ▼                         ▼
-           2.3 Support UI            2.4 Audit UI                 BLOCKED
-                 │                         │
-                 └────────────┬────────────┘
-                              ▼
-                       2.5 Integration Tests                      BLOCKED
-                              │
-                              ▼
-          Phase 3 (Revenue Path) → Phase 4 → Phase 5 → Phase 6    BLOCKED
-
-NEXT PRIORITY: 1.3 + 1.4 (EventBus + JobScheduler must work for module jobs)
-```
 
 ---
 
 ## Cross-Module FK Reference Map
-
-Key coupling points to handle carefully during Phase 3 schema migration:
 
 ```
 tenants ← referenced by almost every table (multi-tenancy scope)
@@ -797,4 +326,4 @@ subscriptions ← invoices, payments, service_instances, domains, dunning
 components ← subscribed_components, product_components
 ```
 
-Modules that own tables with FKs to other module's tables must use `import type` only and resolve references via service calls at runtime, not direct DB joins across module boundaries.
+Modules with FKs to other module tables must use `import type` only and resolve via service calls at runtime.

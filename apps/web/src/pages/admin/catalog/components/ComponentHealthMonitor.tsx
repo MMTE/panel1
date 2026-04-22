@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { trpc } from '../../../api/trpc';
+import { useQuery } from '@tanstack/react-query';
+import { catalogApi } from '../../../api/catalogApi';
 import { CheckCircle, AlertCircle, XCircle, Clock, RefreshCw } from 'lucide-react';
 
 interface ComponentHealthMonitorProps {
@@ -26,20 +27,25 @@ export const ComponentHealthMonitor: React.FC<ComponentHealthMonitorProps> = ({
   const [lastChecked, setLastChecked] = useState<Date | null>(null);
   const [isRefreshing, setIsRefreshing] = useState(false);
 
-  const { data: healthData, refetch, isLoading } = trpc.components.checkHealth.useQuery({
-    componentId,
-    providerKey
-  }, {
-    refetchInterval: 30000, // Check every 30 seconds
-    onSuccess: (data: HealthData) => {
-      setHealthStatus(data.status);
-      setLastChecked(new Date(data.lastChecked));
-    },
-    onError: () => {
+  const { data: healthData, refetch, isLoading, isError } = useQuery({
+    queryKey: ['catalog', 'instance-health', componentId, providerKey],
+    queryFn: () => catalogApi.checkInstanceHealth(componentId, providerKey) as Promise<HealthData>,
+    refetchInterval: 30000,
+  });
+
+  useEffect(() => {
+    if (healthData) {
+      setHealthStatus(healthData.status);
+      setLastChecked(new Date(healthData.lastChecked));
+    }
+  }, [healthData]);
+
+  useEffect(() => {
+    if (isError) {
       setHealthStatus('down');
       setLastChecked(new Date());
     }
-  });
+  }, [isError]);
 
   const handleRefresh = async () => {
     setIsRefreshing(true);
@@ -164,18 +170,19 @@ export const ComponentHealthBadge: React.FC<{
 }> = ({ componentId, providerKey }) => {
   const [healthStatus, setHealthStatus] = useState<HealthStatus>('unknown');
 
-  const { data: healthData } = trpc.components.checkHealth.useQuery({
-    componentId,
-    providerKey
-  }, {
-    refetchInterval: 60000, // Check every minute for compact version
-    onSuccess: (data: HealthData) => {
-      setHealthStatus(data.status);
-    },
-    onError: () => {
-      setHealthStatus('down');
-    }
+  const { data: healthData, isError } = useQuery({
+    queryKey: ['catalog', 'instance-health-badge', componentId, providerKey],
+    queryFn: () => catalogApi.checkInstanceHealth(componentId, providerKey) as Promise<HealthData>,
+    refetchInterval: 60000,
   });
+
+  useEffect(() => {
+    if (healthData) setHealthStatus(healthData.status);
+  }, [healthData]);
+
+  useEffect(() => {
+    if (isError) setHealthStatus('down');
+  }, [isError]);
 
   const getStatusColor = () => {
     switch (healthStatus) {

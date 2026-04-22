@@ -442,7 +442,7 @@ const AdminRoles: React.FC = () => {
     role.description.toLowerCase().includes(searchTerm.toLowerCase())
   ) || [];
 
-  if (!can('user.manage_roles')) {
+  if (!can('core.users.manage_roles')) {
     return (
       <div className="flex items-center justify-center h-64">
         <div className="text-center">

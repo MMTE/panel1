@@ -1,4 +1,5 @@
 import { EmailService, emailService, EmailConfig } from './EmailService';
+import { logger } from '../logging/Logger';
 
 /**
  * Initialize email service with environment configuration
@@ -6,34 +7,32 @@ import { EmailService, emailService, EmailConfig } from './EmailService';
 export async function initializeEmailService(): Promise<void> {
   try {
     const config = EmailService.getConfigFromEnv();
-    
-    console.log('🚀 Initializing email service...');
-    console.log(`📧 SMTP Host: ${config.host}:${config.port}`);
-    console.log(`🔐 Authentication: ${config.auth ? 'Enabled' : 'Disabled'}`);
-    console.log(`📨 From Address: ${config.from}`);
-    
+
+    logger.info('Initializing email service', {
+      smtpHost: config.host,
+      smtpPort: config.port,
+      auth: config.auth ? 'enabled' : 'disabled',
+      from: config.from,
+    });
+
     await emailService.initialize(config);
-    
-    // Test connection if in development mode
+
     if (process.env.NODE_ENV === 'development') {
       const isConnected = await emailService.testConnection();
       if (isConnected) {
-        console.log('✅ Email service connection test passed');
+        logger.info('Email service connection test passed');
       } else {
-        console.warn('⚠️ Email service connection test failed, but service is initialized');
+        logger.warn('Email service connection test failed; SMTP may be down (e.g. start MailHog: docker compose up -d mailhog)');
       }
     }
-    
   } catch (error) {
-    console.error('❌ Failed to initialize email service:', error);
-    
-    // In production, we might want to throw the error to prevent startup
-    // In development, we can continue without email functionality
+    const err = error instanceof Error ? error : new Error(String(error));
+    logger.error('Failed to initialize email service', undefined, err);
+
     if (process.env.NODE_ENV === 'production') {
-      throw error;
-    } else {
-      console.warn('⚠️ Continuing without email service in development mode');
+      throw err;
     }
+    logger.warn('Continuing without working email transport (non-production)');
   }
 }
 
@@ -43,15 +42,16 @@ export async function initializeEmailService(): Promise<void> {
 export async function sendTestEmail(to: string): Promise<boolean> {
   try {
     if (!emailService.isInitialized()) {
-      console.error('Email service not initialized');
+      logger.error('Email service not initialized');
       return false;
     }
-    
+
     await emailService.sendTestEmail(to);
-    console.log(`✅ Test email sent successfully to ${to}`);
+    logger.info('Test email sent successfully', { to });
     return true;
   } catch (error) {
-    console.error(`❌ Failed to send test email to ${to}:`, error);
+    const err = error instanceof Error ? error : new Error(String(error));
+    logger.error('Failed to send test email', { to }, err);
     return false;
   }
 }

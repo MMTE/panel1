@@ -1,68 +1,45 @@
-import { useState } from 'react';
-import { trpc } from '../api/trpc';
+import { useMutation, useQuery } from '@tanstack/react-query';
+import { catalogApi } from '../api/catalogApi';
 
 export function useComponentManagement() {
-  const [isLoading, setIsLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const restartMutation = useMutation({
+    mutationFn: (componentId: string) => catalogApi.restartInstance(componentId),
+  });
+  const updateConfigMutation = useMutation({
+    mutationFn: ({
+      componentId,
+      configuration,
+    }: {
+      componentId: string;
+      configuration: Record<string, unknown>;
+    }) => catalogApi.updateInstanceConfiguration(componentId, configuration),
+  });
+  const scaleMutation = useMutation({
+    mutationFn: ({ componentId, quantity }: { componentId: string; quantity: number }) =>
+      catalogApi.scaleInstance(componentId, quantity),
+  });
 
-  // Component mutations
-  const restartMutation = trpc.components.restart.useMutation();
-  const updateConfigMutation = trpc.components.updateConfiguration.useMutation();
-  const scaleMutation = trpc.components.scale.useMutation();
-
-  // Get component status query
-  const getComponentStatus = (componentId: string) => {
-    return trpc.components.getStatus.useQuery({ componentId }, {
-      refetchInterval: 5000, // Refetch every 5 seconds
+  const getComponentStatus = (componentId: string) =>
+    useQuery({
+      queryKey: ['catalog', 'instance-status', componentId],
+      queryFn: () => catalogApi.getInstanceStatus(componentId),
+      refetchInterval: 5000,
+      enabled: !!componentId,
     });
-  };
 
   const restartComponent = async (componentId: string) => {
-    setIsLoading(true);
-    setError(null);
-    try {
-      const result = await restartMutation.mutateAsync({ componentId });
-      return result.success;
-    } catch (error) {
-      setError(error instanceof Error ? error.message : 'Failed to restart component');
-      return false;
-    } finally {
-      setIsLoading(false);
-    }
+    const result = await restartMutation.mutateAsync(componentId);
+    return result.success;
   };
 
-  const updateConfiguration = async (componentId: string, configuration: Record<string, any>) => {
-    setIsLoading(true);
-    setError(null);
-    try {
-      const result = await updateConfigMutation.mutateAsync({
-        componentId,
-        configuration,
-      });
-      return result.success;
-    } catch (error) {
-      setError(error instanceof Error ? error.message : 'Failed to update component configuration');
-      return false;
-    } finally {
-      setIsLoading(false);
-    }
+  const updateConfiguration = async (componentId: string, configuration: Record<string, unknown>) => {
+    const result = await updateConfigMutation.mutateAsync({ componentId, configuration });
+    return result.success;
   };
 
   const scaleComponent = async (componentId: string, quantity: number) => {
-    setIsLoading(true);
-    setError(null);
-    try {
-      const result = await scaleMutation.mutateAsync({
-        componentId,
-        quantity,
-      });
-      return result.success;
-    } catch (error) {
-      setError(error instanceof Error ? error.message : 'Failed to scale component');
-      return false;
-    } finally {
-      setIsLoading(false);
-    }
+    const result = await scaleMutation.mutateAsync({ componentId, quantity });
+    return result.success;
   };
 
   return {
@@ -70,14 +47,18 @@ export function useComponentManagement() {
     updateConfiguration,
     scaleComponent,
     getComponentStatus,
-    isLoading,
-    error,
-    // Expose mutation states for UI feedback
-    isRestarting: restartMutation.isLoading,
-    isUpdating: updateConfigMutation.isLoading,
-    isScaling: scaleMutation.isLoading,
+    isLoading:
+      restartMutation.isPending || updateConfigMutation.isPending || scaleMutation.isPending,
+    error:
+      restartMutation.error?.message ||
+      updateConfigMutation.error?.message ||
+      scaleMutation.error?.message ||
+      null,
+    isRestarting: restartMutation.isPending,
+    isUpdating: updateConfigMutation.isPending,
+    isScaling: scaleMutation.isPending,
     restartError: restartMutation.error,
     updateError: updateConfigMutation.error,
     scaleError: scaleMutation.error,
   };
-} 
+}

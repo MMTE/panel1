@@ -6,13 +6,17 @@ import {
   AlertCircle,
   CheckCircle,
   XCircle,
-  Eye,
   Activity,
   Download,
+  ChevronDown,
+  ChevronRight,
+  Loader2,
+  RefreshCw,
 } from 'lucide-react';
-import { useQuery } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '../../hooks/useAuth';
-import { auditApi, type AuditLogRow } from '../../api/auditApi';
+import { auditApi, type AuditLogRow, type AuditExportListItem } from '../../api/auditApi';
+import { Can } from '../../hooks/usePermissions';
 
 function dateRangeToIso(range: string): { startDate: string; endDate: string } {
   const end = new Date();
@@ -33,32 +37,69 @@ function dateRangeToIso(range: string): { startDate: string; endDate: string } {
 
 export function AdminAuditLogs() {
   const { user } = useAuth();
+  const queryClient = useQueryClient();
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedAction, setSelectedAction] = useState('all');
+  const [selectedResource, setSelectedResource] = useState('all');
   const [dateRange, setDateRange] = useState('7d');
   const [page, setPage] = useState(1);
+  const [expandedId, setExpandedId] = useState<string | null>(null);
   const limit = 20;
 
   const { startDate, endDate } = useMemo(() => dateRangeToIso(dateRange), [dateRange]);
 
+  const { data: filterOptions } = useQuery({
+    queryKey: ['audit', 'filter-options'],
+    queryFn: () => auditApi.getFilterOptions(),
+    enabled: !!user,
+  });
+
+  const statDays =
+    dateRange === '1d' ? 1 : dateRange === '7d' ? 7 : dateRange === '30d' ? 30 : 90;
+
+  const { data: statsData } = useQuery({
+    queryKey: ['audit', 'stats', statDays],
+    queryFn: () => auditApi.getStats(statDays),
+    enabled: !!user,
+  });
+
   const { data: auditLogsData, isLoading: logsLoading } = useQuery({
-    queryKey: ['audit', 'logs', page, selectedAction, dateRange],
+    queryKey: ['audit', 'logs', page, selectedAction, selectedResource, dateRange],
     queryFn: () =>
       auditApi.queryLogs({
         page,
         limit,
         actionTypes: selectedAction === 'all' ? undefined : selectedAction,
+        resourceTypes: selectedResource === 'all' ? undefined : selectedResource,
         startDate,
         endDate,
       }),
     enabled: !!user,
   });
 
-  const auditLogs: AuditLogRow[] = auditLogsData?.logs || [];
+  const { data: exportsList, isLoading: exportsLoading } = useQuery({
+    queryKey: ['audit', 'exports', 'list'],
+    queryFn: () => auditApi.listExports({ limit: 10, offset: 0 }),
+    enabled: !!user,
+  });
+
+  const requestExport = useMutation({
+    mutationFn: (format: 'json' | 'csv') =>
+      auditApi.createExport({
+        startDate,
+        endDate,
+        format,
+      }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['audit', 'exports', 'list'] });
+    },
+  });
+
   const total = auditLogsData?.total ?? 0;
   const totalPages = Math.max(1, Math.ceil(total / limit));
 
   const filteredLogs = useMemo(() => {
+    const auditLogs: AuditLogRow[] = auditLogsData?.logs || [];
     const q = searchTerm.toLowerCase();
     if (!q) return auditLogs;
     return auditLogs.filter(
@@ -68,7 +109,7 @@ export function AdminAuditLogs() {
         (log.resourceId && log.resourceId.toLowerCase().includes(q)) ||
         (log.userId && log.userId.toLowerCase().includes(q)),
     );
-  }, [auditLogs, searchTerm]);
+  }, [auditLogsData?.logs, searchTerm]);
 
   const getActionColor = (action: string) => {
     switch (action.toLowerCase()) {
@@ -117,28 +158,39 @@ export function AdminAuditLogs() {
     return '—';
   };
 
+  const actionTypes = filterOptions?.actionTypes?.length
+    ? filterOptions.actionTypes
+    : ['create', 'update', 'delete', 'login', 'logout'];
+  const resourceTypes = filterOptions?.resourceTypes ?? [];
+
+  async function downloadExportFile(exp: AuditExportListItem) {
+    if (exp.status !== 'completed') return;
+    const blob = await auditApi.downloadExportBlob(exp.id);
+    const ext = exp.format === 'csv' ? 'csv' : 'json';
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `audit-export-${exp.id.slice(0, 8)}.${ext}`;
+    a.click();
+    URL.revokeObjectURL(a.href);
+  }
+
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between flex-wrap gap-4">
         <div>
           <h1 className="text-3xl font-bold text-gray-900">Audit Logs</h1>
           <p className="text-gray-600 mt-1">Monitor system activities and user actions</p>
         </div>
-        <button
-          type="button"
-          className="bg-gradient-to-r from-purple-500 to-pink-500 text-white px-4 py-2 rounded-lg hover:from-purple-600 hover:to-pink-600 transition-all duration-200 flex items-center space-x-2"
-        >
-          <Download className="w-4 h-4" />
-          <span>Export</span>
-        </button>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
         <div className="bg-white rounded-xl border border-gray-200 p-6">
           <div className="flex items-center justify-between">
             <div>
-              <p className="text-gray-600">Total Logs</p>
-              <p className="text-2xl font-bold text-gray-900 mt-1">{total.toLocaleString()}</p>
+              <p className="text-gray-600">Total events (period)</p>
+              <p className="text-2xl font-bold text-gray-900 mt-1">
+                {(statsData?.totalEvents ?? total).toLocaleString()}
+              </p>
             </div>
             <Shield className="w-8 h-8 text-purple-500" />
           </div>
@@ -166,9 +218,9 @@ export function AdminAuditLogs() {
         <div className="bg-white rounded-xl border border-gray-200 p-6">
           <div className="flex items-center justify-between">
             <div>
-              <p className="text-gray-600">Delete actions (page)</p>
-              <p className="text-2xl font-bold text-gray-900 mt-1">
-                {filteredLogs.filter((l) => l.actionType.toLowerCase().includes('delete')).length}
+              <p className="text-gray-600">Top action (period)</p>
+              <p className="text-sm font-bold text-gray-900 mt-1 truncate">
+                {statsData?.eventsByAction?.[0]?.actionType ?? '—'}
               </p>
             </div>
             <AlertCircle className="w-8 h-8 text-red-500" />
@@ -176,9 +228,100 @@ export function AdminAuditLogs() {
         </div>
       </div>
 
+      <Can permission="audit.logs.export">
+        <div className="bg-white rounded-xl border border-gray-200 p-6 space-y-4">
+          <div className="flex flex-wrap items-center justify-between gap-4">
+            <h2 className="text-lg font-semibold text-gray-900 flex items-center gap-2">
+              <Download className="w-5 h-5" />
+              Exports
+            </h2>
+            <div className="flex flex-wrap gap-2">
+              <button
+                type="button"
+                disabled={requestExport.isPending}
+                onClick={() => requestExport.mutate('json')}
+                className="inline-flex items-center px-3 py-2 bg-gray-900 text-white rounded-lg text-sm hover:bg-gray-800 disabled:opacity-50"
+              >
+                {requestExport.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Request JSON'}
+              </button>
+              <button
+                type="button"
+                disabled={requestExport.isPending}
+                onClick={() => requestExport.mutate('csv')}
+                className="inline-flex items-center px-3 py-2 border border-gray-300 rounded-lg text-sm hover:bg-gray-50 disabled:opacity-50"
+              >
+                Request CSV
+              </button>
+              <button
+                type="button"
+                onClick={() => queryClient.invalidateQueries({ queryKey: ['audit', 'exports', 'list'] })}
+                className="inline-flex items-center px-3 py-2 text-gray-700 border border-gray-300 rounded-lg text-sm hover:bg-gray-50"
+              >
+                <RefreshCw className="w-4 h-4 mr-1" />
+                Refresh list
+              </button>
+            </div>
+          </div>
+          <p className="text-sm text-gray-500">
+            Uses the current date range ({dateRange}). Exports are generated asynchronously; refresh the list until
+            status is completed, then download.
+          </p>
+          {requestExport.isError && (
+            <p className="text-sm text-red-600">{(requestExport.error as Error).message}</p>
+          )}
+          {exportsLoading ? (
+            <p className="text-sm text-gray-500">Loading exports…</p>
+          ) : (
+            <div className="overflow-x-auto border border-gray-200 rounded-lg">
+              <table className="w-full text-sm">
+                <thead className="bg-gray-50">
+                  <tr>
+                    <th className="text-left py-2 px-3">Created</th>
+                    <th className="text-left py-2 px-3">Format</th>
+                    <th className="text-left py-2 px-3">Status</th>
+                    <th className="text-left py-2 px-3">Records</th>
+                    <th className="text-right py-2 px-3">Download</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-200">
+                  {(exportsList?.exports ?? []).length === 0 ? (
+                    <tr>
+                      <td colSpan={5} className="py-4 px-3 text-gray-500">
+                        No exports yet
+                      </td>
+                    </tr>
+                  ) : (
+                    exportsList!.exports.map((exp) => (
+                      <tr key={exp.id}>
+                        <td className="py-2 px-3 whitespace-nowrap">
+                          {new Date(exp.createdAt).toLocaleString()}
+                        </td>
+                        <td className="py-2 px-3">{exp.format}</td>
+                        <td className="py-2 px-3">{exp.status}</td>
+                        <td className="py-2 px-3">{exp.recordCount ?? '—'}</td>
+                        <td className="py-2 px-3 text-right">
+                          <button
+                            type="button"
+                            disabled={exp.status !== 'completed'}
+                            onClick={() => downloadExportFile(exp)}
+                            className="text-purple-600 hover:text-purple-800 disabled:text-gray-400 text-sm font-medium"
+                          >
+                            Download
+                          </button>
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      </Can>
+
       <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
         <div className="flex flex-col md:flex-row md:items-center md:justify-between space-y-4 md:space-y-0">
-          <div className="flex flex-col sm:flex-row sm:items-center space-y-3 sm:space-y-0 sm:space-x-4">
+          <div className="flex flex-col sm:flex-row sm:items-center space-y-3 sm:space-y-0 sm:space-x-4 flex-wrap">
             <div className="relative">
               <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-gray-400" />
               <input
@@ -197,12 +340,27 @@ export function AdminAuditLogs() {
               }}
               className="border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-purple-500 focus:border-transparent"
             >
-              <option value="all">All Actions</option>
-              <option value="create">create</option>
-              <option value="update">update</option>
-              <option value="delete">delete</option>
-              <option value="login">login</option>
-              <option value="logout">logout</option>
+              <option value="all">All action types</option>
+              {actionTypes.map((a) => (
+                <option key={a} value={a}>
+                  {a}
+                </option>
+              ))}
+            </select>
+            <select
+              value={selectedResource}
+              onChange={(e) => {
+                setSelectedResource(e.target.value);
+                setPage(1);
+              }}
+              className="border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-purple-500 focus:border-transparent max-w-[220px]"
+            >
+              <option value="all">All resources</option>
+              {resourceTypes.map((r) => (
+                <option key={r} value={r}>
+                  {r}
+                </option>
+              ))}
             </select>
             <select
               value={dateRange}
@@ -233,61 +391,83 @@ export function AdminAuditLogs() {
             <table className="w-full">
               <thead className="bg-gray-50 border-b border-gray-200">
                 <tr>
-                  <th className="text-left py-3 px-6 font-medium text-gray-900">Action</th>
-                  <th className="text-left py-3 px-6 font-medium text-gray-900">User</th>
-                  <th className="text-left py-3 px-6 font-medium text-gray-900">Resource</th>
-                  <th className="text-left py-3 px-6 font-medium text-gray-900">Details</th>
-                  <th className="text-left py-3 px-6 font-medium text-gray-900">IP Address</th>
-                  <th className="text-left py-3 px-6 font-medium text-gray-900">Timestamp</th>
-                  <th className="text-right py-3 px-6 font-medium text-gray-900">Actions</th>
+                  <th className="w-8 py-3 px-2" />
+                  <th className="text-left py-3 px-4 font-medium text-gray-900">Action</th>
+                  <th className="text-left py-3 px-4 font-medium text-gray-900">User</th>
+                  <th className="text-left py-3 px-4 font-medium text-gray-900">Resource</th>
+                  <th className="text-left py-3 px-4 font-medium text-gray-900">Details</th>
+                  <th className="text-left py-3 px-4 font-medium text-gray-900">IP Address</th>
+                  <th className="text-left py-3 px-4 font-medium text-gray-900">Timestamp</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-200">
                 {filteredLogs.map((log) => {
                   const ActionIcon = getActionIcon(log.actionType);
                   const actionLabel = log.actionType.split('.').pop() || log.actionType;
+                  const open = expandedId === log.id;
                   return (
-                    <tr key={log.id} className="hover:bg-gray-50 transition-colors">
-                      <td className="py-4 px-6">
-                        <div className="flex items-center space-x-3">
-                          <ActionIcon className="w-5 h-5 text-gray-500" />
-                          <span
-                            className={`px-2 py-1 rounded-full text-xs font-medium ${getActionColor(actionLabel)}`}
-                          >
-                            {log.actionType}
-                          </span>
-                        </div>
-                      </td>
-                      <td className="py-4 px-6">
-                        <div className="font-mono text-sm text-gray-900">
-                          {log.userId ? `${log.userId.slice(0, 8)}…` : 'System'}
-                        </div>
-                      </td>
-                      <td className="py-4 px-6">
-                        <div className="font-medium text-gray-900">{log.resourceType}</div>
-                        {log.resourceId && (
-                          <div className="text-sm text-gray-500">ID: {log.resourceId}</div>
-                        )}
-                      </td>
-                      <td className="py-4 px-6">
-                        <div className="text-gray-900 max-w-xs truncate" title={detailsPreview(log)}>
-                          {detailsPreview(log)}
-                        </div>
-                      </td>
-                      <td className="py-4 px-6">
-                        <div className="text-gray-900 font-mono text-sm">{log.ipAddress || '—'}</div>
-                      </td>
-                      <td className="py-4 px-6">
-                        <div className="text-gray-900">{formatDate(log.createdAt)}</div>
-                      </td>
-                      <td className="py-4 px-6">
-                        <div className="flex items-center justify-end">
-                          <button type="button" className="p-1 rounded-lg hover:bg-gray-100 transition-colors">
-                            <Eye className="w-4 h-4 text-gray-600" />
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
+                    <React.Fragment key={log.id}>
+                      <tr
+                        className="hover:bg-gray-50 transition-colors cursor-pointer"
+                        onClick={() => setExpandedId(open ? null : log.id)}
+                      >
+                        <td className="py-3 px-2 text-gray-400">
+                          {open ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
+                        </td>
+                        <td className="py-3 px-4">
+                          <div className="flex items-center space-x-3">
+                            <ActionIcon className="w-5 h-5 text-gray-500 shrink-0" />
+                            <span
+                              className={`px-2 py-1 rounded-full text-xs font-medium ${getActionColor(actionLabel)}`}
+                            >
+                              {log.actionType}
+                            </span>
+                          </div>
+                        </td>
+                        <td className="py-3 px-4">
+                          <div className="font-mono text-sm text-gray-900">
+                            {log.userId ? `${log.userId.slice(0, 8)}…` : 'System'}
+                          </div>
+                        </td>
+                        <td className="py-3 px-4">
+                          <div className="font-medium text-gray-900">{log.resourceType}</div>
+                          {log.resourceId && (
+                            <div className="text-sm text-gray-500">ID: {log.resourceId}</div>
+                          )}
+                        </td>
+                        <td className="py-3 px-4">
+                          <div className="text-gray-900 max-w-xs truncate" title={detailsPreview(log)}>
+                            {detailsPreview(log)}
+                          </div>
+                        </td>
+                        <td className="py-3 px-4">
+                          <div className="text-gray-900 font-mono text-sm">{log.ipAddress || '—'}</div>
+                        </td>
+                        <td className="py-3 px-4">
+                          <div className="text-gray-900 text-sm">{formatDate(log.createdAt)}</div>
+                        </td>
+                      </tr>
+                      {open && (
+                        <tr className="bg-gray-50">
+                          <td colSpan={7} className="px-6 py-4 text-sm text-gray-800">
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                              <div>
+                                <p className="font-medium text-gray-700 mb-1">Metadata</p>
+                                <pre className="text-xs bg-white border border-gray-200 rounded p-3 overflow-x-auto max-h-48">
+                                  {JSON.stringify(log.metadata, null, 2)}
+                                </pre>
+                              </div>
+                              <div>
+                                <p className="font-medium text-gray-700 mb-1">Old / new values</p>
+                                <pre className="text-xs bg-white border border-gray-200 rounded p-3 overflow-x-auto max-h-48">
+                                  {JSON.stringify({ oldValues: log.oldValues, newValues: log.newValues }, null, 2)}
+                                </pre>
+                              </div>
+                            </div>
+                          </td>
+                        </tr>
+                      )}
+                    </React.Fragment>
                   );
                 })}
               </tbody>

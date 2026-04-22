@@ -1,27 +1,21 @@
-import { trpc } from '../api/trpc';
+import { useQuery } from '@tanstack/react-query';
+import { useAuth } from './useAuth';
+import { catalogApi, type LegacyPlanRow } from '../api/catalogApi';
 
-export interface Plan {
-  id: string;
-  name: string;
-  description: string | null;
-  price: string;
-  currency: string;
-  interval: 'MONTHLY' | 'YEARLY' | 'WEEKLY' | 'DAILY';
-  isActive: boolean;
-  features: any | null;
-  createdAt: Date;
-  updatedAt: Date;
-}
+export type Plan = LegacyPlanRow;
 
 export function usePlans() {
-  const { data: plans = [], isLoading: loading, error, refetch } = trpc.plans.getAll.useQuery({
-    activeOnly: true,
+  const { user } = useAuth();
+  const { data: plans = [], isLoading: loading, error, refetch } = useQuery({
+    queryKey: ['catalog', 'legacy-plans'],
+    queryFn: () => catalogApi.listLegacyPlans(true),
+    enabled: !!user,
   });
 
   return {
     plans,
     loading,
-    error: error?.message || null,
+    error: error instanceof Error ? error.message : null,
     refetch,
   };
 }

@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
-import { trpc } from '../../../api/trpc';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { catalogApi } from '../../../api/catalogApi';
 import { Plus, Edit, Trash2, Settings, Package, Eye, X, Loader, AlertCircle } from 'lucide-react';
 import { ComponentRegistrationForm } from './components/ComponentRegistrationForm';
 
@@ -9,37 +10,40 @@ const ComponentRegistrationManagement: React.FC = () => {
   const [selectedType, setSelectedType] = useState('all');
   const [isSaving, setIsSaving] = useState(false);
 
-  // Fetch components
-  const { 
-    data: components, 
-    isLoading, 
-    error, 
-    refetch 
-  } = trpc.catalog.listComponents.useQuery();
-
-  // Get tRPC utils for cache invalidation
-  const utils = trpc.useUtils();
-
-  // Delete component mutation
-  const deleteComponent = trpc.catalog.deleteComponent.useMutation({
-    onSuccess: () => {
-      utils.catalog.listComponents.invalidate();
-    },
-    onError: (error) => {
-      console.error('Failed to delete component:', error);
-    }
+  const queryClient = useQueryClient();
+  const {
+    data: components,
+    isLoading,
+    error,
+    refetch,
+  } = useQuery({
+    queryKey: ['catalog', 'components'],
+    queryFn: () => catalogApi.listComponents(),
   });
 
-  const handleSaveComponent = async (data: any) => {
+  const deleteComponent = useMutation({
+    mutationFn: (id: string) => catalogApi.deleteComponentDefinition(id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['catalog', 'components'] });
+    },
+    onError: (err) => {
+      console.error('Failed to delete component:', err);
+    },
+  });
+
+  const handleSaveComponent = async (data: Record<string, unknown>) => {
     try {
       setIsSaving(true);
-      // For now, just simulate the save since the backend endpoints have issues
-      console.log('Saving component:', data);
-      await new Promise(resolve => setTimeout(resolve, 1000));
+      if (editingComponent?.id) {
+        await catalogApi.updateRegisteredComponent(editingComponent.id, data);
+      } else {
+        await catalogApi.registerComponent(data);
+      }
+      queryClient.invalidateQueries({ queryKey: ['catalog', 'components'] });
       setShowCreateModal(false);
       setEditingComponent(null);
-    } catch (error) {
-      console.error('Failed to save component:', error);
+    } catch (err) {
+      console.error('Failed to save component:', err);
     } finally {
       setIsSaving(false);
     }
@@ -47,7 +51,7 @@ const ComponentRegistrationManagement: React.FC = () => {
 
   const handleDeleteComponent = (componentId: string) => {
     if (window.confirm('Are you sure you want to delete this component? This action cannot be undone.')) {
-      deleteComponent.mutate({ id: componentId });
+      deleteComponent.mutate(componentId);
     }
   };
 
@@ -56,9 +60,14 @@ const ComponentRegistrationManagement: React.FC = () => {
     setShowCreateModal(true);
   };
 
-  const filteredComponents = components ? (selectedType === 'all' 
-    ? components 
-    : components.filter(component => component.type === selectedType)) : [];
+  const filteredComponents = components
+    ? selectedType === 'all'
+      ? components
+      : (components as { type?: string; metadata?: { componentType?: string } }[]).filter(
+          (component) =>
+            component.type === selectedType || component.metadata?.componentType === selectedType,
+        )
+    : [];
 
   const componentTypes = ['all', 'HOSTING', 'DOMAIN', 'SSL', 'EMAIL', 'DATABASE', 'STORAGE', 'BANDWIDTH', 'CPU', 'RAM', 'BACKUP', 'OTHER'];
 
@@ -132,7 +141,7 @@ const ComponentRegistrationManagement: React.FC = () => {
           <div className="text-center">
             <AlertCircle className="w-12 h-12 text-red-500 mx-auto mb-4" />
             <h3 className="text-lg font-medium text-gray-900 mb-2">Error Loading Components</h3>
-            <p className="text-gray-600 mb-4">{error.message}</p>
+            <p className="text-gray-600 mb-4">{error instanceof Error ? error.message : 'Error'}</p>
             <button
               onClick={() => refetch()}
               className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors"

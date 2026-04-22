@@ -5,7 +5,7 @@ import {
   provisioningTasks 
 } from '../../db/schema';
 import { eq, and } from 'drizzle-orm';
-import { JobScheduler } from '../jobs/JobScheduler';
+import { OperationalQueues } from '../jobs/OperationalQueues';
 import { EventEmitter } from 'events';
 import {
   ProvisioningAdapter,
@@ -27,12 +27,12 @@ export class ProvisioningManager extends EventEmitter {
   private static instance: ProvisioningManager;
   private plugins: Map<string, ProvisioningPlugin> = new Map();
   private adapters: Map<string, ProvisioningAdapter> = new Map();
-  private jobScheduler: JobScheduler;
+  private jobScheduler: OperationalQueues;
   private initialized = false;
 
   private constructor() {
     super();
-    this.jobScheduler = JobScheduler.getInstance();
+    this.jobScheduler = OperationalQueues.getInstance();
   }
 
   static getInstance(): ProvisioningManager {

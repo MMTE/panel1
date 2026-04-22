@@ -196,7 +196,7 @@ export const permissionsRouter = router({
         roles.map(role => permissionManager.getRolePermissions(role))
       );
       const rolesWithPermission = roles.filter((role, index) =>
-        rolePermissions[index].includes(permission.id)
+        rolePermissions[index].includes(permission.name)
       );
 
       return {
@@ -278,6 +278,8 @@ export const permissionsRouter = router({
  */
 function getRoleDescription(role: Role): string {
   switch (role) {
+    case Role.SUPER_ADMIN:
+      return 'Unrestricted platform access';
     case Role.ADMIN:
       return 'Full system access with all permissions';
     case Role.STAFF:

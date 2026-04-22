@@ -1,5 +1,5 @@
 import type { ModuleContext } from '@panel1/types';
-import { eq, and, or, desc, asc, count, sql, isNull } from 'drizzle-orm';
+import { eq, and, or, desc, asc, count, sql, lt } from 'drizzle-orm';
 import {
   supportTickets,
   ticketMessages,
@@ -427,6 +427,35 @@ export class SupportService implements ISupportService {
         sql`${supportTickets.satisfactionRating} IS NOT NULL`,
       ));
 
+    const byPriority = await this.db
+      .select({
+        priority: supportTickets.priority,
+        c: count(),
+      })
+      .from(supportTickets)
+      .where(eq(supportTickets.tenantId, tenantId))
+      .groupBy(supportTickets.priority);
+
+    const ticketsByPriority: Record<string, number> = {};
+    for (const row of byPriority) {
+      ticketsByPriority[String(row.priority ?? 'UNKNOWN')] = Number(row.c);
+    }
+
+    const byCategory = await this.db
+      .select({
+        label: sql<string>`coalesce(${supportCategories.name}, 'Uncategorized')`,
+        c: count(),
+      })
+      .from(supportTickets)
+      .leftJoin(supportCategories, eq(supportTickets.categoryId, supportCategories.id))
+      .where(eq(supportTickets.tenantId, tenantId))
+      .groupBy(sql`coalesce(${supportCategories.name}, 'Uncategorized')`);
+
+    const ticketsByCategory: Record<string, number> = {};
+    for (const row of byCategory) {
+      ticketsByCategory[row.label] = Number(row.c);
+    }
+
     return {
       totalTickets: totalResult.count,
       openTickets: openResult.count,
@@ -434,9 +463,46 @@ export class SupportService implements ISupportService {
       averageFirstResponseTime: Math.round(avgFirstResponse[0]?.avg || 0),
       averageResolutionTime: Math.round(avgResolution[0]?.avg || 0),
       satisfactionScore: Number((avgSatisfaction[0]?.avg || 0).toFixed(1)),
-      ticketsByPriority: {},
-      ticketsByCategory: {},
+      ticketsByPriority,
+      ticketsByCategory,
     };
+  }
+
+  async runEscalationCheck(): Promise<void> {
+    const tenantIds = await this.sla.listSupportTenantIds();
+    for (const tid of tenantIds) {
+      await this.sla.processEscalations(tid);
+    }
+  }
+
+  async closeStaleTickets(): Promise<void> {
+    const days = Math.max(1, Number(this.ctx.config.staleTicketCloseDaysAfterLastActivity ?? 14));
+    const cutoff = new Date();
+    cutoff.setUTCDate(cutoff.getUTCDate() - days);
+
+    const stale = await this.db
+      .select()
+      .from(supportTickets)
+      .where(
+        and(eq(supportTickets.status, 'WAITING_CUSTOMER'), lt(supportTickets.lastActivityAt, cutoff)),
+      );
+
+    const now = new Date();
+    for (const t of stale) {
+      await this.db
+        .update(supportTickets)
+        .set({ status: 'CLOSED', closedAt: now, lastActivityAt: now, updatedAt: now })
+        .where(and(eq(supportTickets.id, t.id), eq(supportTickets.tenantId, t.tenantId)));
+
+      await this.ctx.emit('support.ticket.closed', {
+        ticketId: t.id,
+        closedAt: now,
+      });
+    }
+
+    if (stale.length) {
+      this.ctx.logger.info(`Auto-closed ${stale.length} stale waiting-on-customer tickets`);
+    }
   }
 
   private async generateTicketNumber(tenantId: string, tx: any): Promise<string> {

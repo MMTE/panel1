@@ -138,42 +138,6 @@ export class SupportAutomationEngine {
       .orderBy(supportAutomationRules.priority);
   }
 
-  async processEscalations(tenantId: string): Promise<void> {
-    this.ctx.logger.info(`Processing ticket escalations for tenant: ${tenantId}`);
-
-    try {
-      const overdueFirstResponse = await this.db
-        .select()
-        .from(supportTickets)
-        .where(and(
-          eq(supportTickets.tenantId, tenantId),
-          sql`${supportTickets.status} IN ('OPEN', 'IN_PROGRESS')`,
-          sql`${supportTickets.firstResponseDue} < NOW()`,
-          sql`${supportTickets.firstResponseAt} IS NULL`,
-        ));
-
-      for (const ticket of overdueFirstResponse) {
-        await this.escalateTicket(ticket, 'first_response_overdue', tenantId);
-      }
-
-      const overdueResolution = await this.db
-        .select()
-        .from(supportTickets)
-        .where(and(
-          eq(supportTickets.tenantId, tenantId),
-          sql`${supportTickets.status} NOT IN ('RESOLVED', 'CLOSED')`,
-          sql`${supportTickets.resolutionDue} < NOW()`,
-          sql`${supportTickets.resolvedAt} IS NULL`,
-        ));
-
-      for (const ticket of overdueResolution) {
-        await this.escalateTicket(ticket, 'resolution_overdue', tenantId);
-      }
-    } catch (error) {
-      this.ctx.logger.error('Escalation processing failed:', error);
-    }
-  }
-
   private evaluateConditions(conditions: AutomationCondition[], ticket: SupportTicket): boolean {
     for (const condition of conditions) {
       if (!this.evaluateCondition(condition, ticket)) return false;

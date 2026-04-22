@@ -1,9 +1,9 @@
 import React, { useState, useEffect } from 'react';
-import { 
-  Package, 
-  Search, 
-  Filter, 
-  Plus, 
+import {
+  Package,
+  Search,
+  Filter,
+  Plus,
   Edit,
   Trash2,
   MoreHorizontal,
@@ -14,7 +14,8 @@ import {
   XCircle,
   Star,
   Copy,
-  Eye
+  Eye,
+  AlertCircle,
 } from 'lucide-react';
 import { PluginSlot } from '../../lib/plugins';
 import { useAuth } from '../../hooks/useAuth';

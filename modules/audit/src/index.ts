@@ -16,11 +16,7 @@ export default defineModule({
     exportEnabled: z.boolean().default(true),
   }),
 
-  permissions: [
-    'audit.view',
-    'audit.export',
-    'audit.cleanup',
-  ],
+  permissions: ['audit.logs.view', 'audit.logs.export', 'audit.logs.cleanup'],
 
   emits: [
     'audit.logged',
@@ -35,7 +31,9 @@ export default defineModule({
     ctx.routes(auditRoutes(ctx));
 
     ctx.job('audit-cleanup', '0 2 * * 0', async () => {
-      ctx.logger.info('Running weekly audit log cleanup');
+      ctx.logger.info('Running weekly audit maintenance');
+      const result = await auditService.runWeeklyMaintenance();
+      ctx.logger.info('Weekly audit maintenance done', { ...result });
     });
   },
 });

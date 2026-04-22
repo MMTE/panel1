@@ -26,7 +26,8 @@ export enum ResourceType {
   SUPPORT_TICKET = 'SUPPORT_TICKET',
   PLUGIN = 'PLUGIN',
   AUDIT_LOG = 'AUDIT_LOG',
-  ANALYTICS = 'ANALYTICS'
+  ANALYTICS = 'ANALYTICS',
+  DOMAIN = 'DOMAIN',
 }
 
 export enum PermissionAction {

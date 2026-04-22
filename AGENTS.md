@@ -18,7 +18,8 @@ npm run lint             # All workspaces via turbo
 
 # Test
 npm run test             # All workspaces via turbo
-cd apps/api && npm run test:hono       # Hono security middleware (vitest)
+cd apps/api && npm run test:hono       # Vitest: Hono security + integration (audit/support when DB + tables exist)
+cd apps/api && npm run test:integration # Vitest: only `src/__tests__/integration` (same conditions)
 cd apps/api && npx vitest run          # API tests only (if configured)
 cd apps/web && npx vitest run          # Web tests only
 cd apps/api && npx vitest run src/path/to/file.test.ts  # Single test

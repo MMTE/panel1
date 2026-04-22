@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { supportSchema } from './schema.js';
 import { SupportService } from './service.js';
 import { supportRoutes } from './routes.js';
+import type { ISupportService } from './types.js';
 
 export default defineModule({
   name: 'support',
@@ -17,9 +18,12 @@ export default defineModule({
     automationEnabled: z.boolean().default(true),
     knowledgeBaseEnabled: z.boolean().default(true),
     ticketNumberPrefix: z.string().default('TKT'),
+    /** Auto-close `WAITING_CUSTOMER` tickets with no activity for this many days (daily job). */
+    staleTicketCloseDaysAfterLastActivity: z.number().min(1).default(14),
   }),
 
   permissions: [
+    'support.dashboard.view',
     'support.tickets.view',
     'support.tickets.create',
     'support.tickets.manage',
@@ -48,11 +52,13 @@ export default defineModule({
     ctx.routes(supportRoutes(ctx));
 
     ctx.job('support-escalation-check', '*/15 * * * *', async () => {
-      ctx.logger.info('Running SLA escalation check');
+      const support = ctx.service<ISupportService>('support');
+      await support.runEscalationCheck();
     });
 
     ctx.job('support-auto-close-stale', '0 2 * * *', async () => {
-      ctx.logger.info('Running stale ticket auto-close');
+      const support = ctx.service<ISupportService>('support');
+      await support.closeStaleTickets();
     });
   },
 });

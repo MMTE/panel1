@@ -1,0 +1,15 @@
+{
+  "extends": "../../tsconfig.json",
+  "compilerOptions": {
+    "rootDir": "./src",
+    "baseUrl": ".",
+    "paths": {
+      "@panel1/types": ["../../packages/types/src"],
+      "@panel1/types/*": ["../../packages/types/src/*"],
+      "@panel1/core": ["../../packages/core/src"],
+      "@panel1/core/*": ["../../packages/core/src/*"]
+    }
+  },
+  "include": ["src/**/*"],
+  "exclude": ["node_modules", "dist"]
+}

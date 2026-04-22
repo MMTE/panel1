@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { trpc } from '../../../../api/trpc';
+import { useQuery } from '@tanstack/react-query';
+import { catalogApi } from '../../../../api/catalogApi';
 import { Plus, Trash2, Loader } from 'lucide-react';
 import { DynamicConfigForm } from './DynamicConfigForm';
 
@@ -45,7 +46,10 @@ export const ProductBuilder: React.FC<{
   onFormChange: (data: ProductFormData) => void;
   isSaving?: boolean;
 }> = ({ initialData, onSave, onCancel, onFormChange, isSaving = false }) => {
-  const { data: components } = trpc.catalog.listComponents.useQuery();
+  const { data: components = [] } = useQuery({
+    queryKey: ['catalog', 'components'],
+    queryFn: () => catalogApi.listComponents(),
+  });
   
   const [formData, setFormData] = useState<ProductFormData>({
     name: '',
@@ -70,6 +74,40 @@ export const ProductBuilder: React.FC<{
   // Update form data when initialData changes (for editing)
   useEffect(() => {
     if (initialData) {
+      const rawComps = initialData.components || [];
+      const mappedComponents = Array.isArray(rawComps)
+        ? rawComps.map((row: Record<string, unknown>) => ({
+            componentId: (row.componentId as string) || ((row.component as Record<string, unknown>)?.id as string) || '',
+            pricing: (row.pricingModel as ComponentConfig['pricing']) || (row.pricing as ComponentConfig['pricing']),
+            unitPrice:
+              (row.unitPrice as string) ||
+              ((row.pricingDetails as Record<string, unknown>)?.unitPrice as string | undefined),
+            includedUnits:
+              (row.includedUnits as number) ||
+              ((row.pricingDetails as Record<string, unknown>)?.includedUnits as number | undefined),
+            configuration: (row.configuration as Record<string, unknown>) || {},
+            tiers:
+              (row.tiers as ComponentConfig['tiers']) ||
+              ((row.pricingDetails as Record<string, unknown>)?.tiers as ComponentConfig['tiers']),
+          }))
+        : [];
+
+      const rawPlans = initialData.billingPlans || [];
+      const mappedPlans = Array.isArray(rawPlans)
+        ? rawPlans.map((p: Record<string, unknown>) => ({
+            name: p.name as string,
+            basePrice: String(p.basePrice ?? ''),
+            interval: p.interval as BillingPlan['interval'],
+            setupFee: p.setupFee as string | undefined,
+          }))
+        : [
+            {
+              name: 'Monthly',
+              basePrice: '0.00',
+              interval: 'MONTHLY' as const,
+            },
+          ];
+
       setFormData({
         name: initialData.name || '',
         description: initialData.description || '',
@@ -81,14 +119,8 @@ export const ProductBuilder: React.FC<{
         sortOrder: initialData.sortOrder || 0,
         trialPeriodDays: initialData.trialPeriodDays,
         setupRequired: initialData.setupRequired || false,
-        components: initialData.components || [],
-        billingPlans: initialData.billingPlans || [
-          {
-            name: 'Monthly',
-            basePrice: '0.00',
-            interval: 'MONTHLY'
-          }
-        ]
+        components: mappedComponents,
+        billingPlans: mappedPlans,
       });
     }
   }, [initialData]);

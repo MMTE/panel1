@@ -13,13 +13,13 @@ export const menuItems = [
     label: 'Dashboard',
     icon: <LayoutDashboard className="w-5 h-5" />,
     href: '/admin',
-    permission: 'admin.dashboard.view'
+    permission: 'core.dashboard.view'
   },
   {
     label: 'Clients',
     icon: <Users className="w-5 h-5" />,
     href: '/admin/clients',
-    permission: 'admin.clients.view'
+    permission: 'clients.clients.view'
   },
   {
     label: 'Billing',
@@ -28,17 +28,17 @@ export const menuItems = [
       {
         label: 'Invoices',
         href: '/admin/invoices',
-        permission: 'admin.invoices.view'
+        permission: 'billing.invoices.view'
       },
       {
         label: 'Plans',
         href: '/admin/plans',
-        permission: 'admin.plans.view'
+        permission: 'catalog.plans.view'
       },
       {
         label: 'Payment Gateways',
         href: '/admin/payment-gateways',
-        permission: 'admin.payment_gateways.view'
+        permission: 'billing.payment_gateways.view'
       }
     ]
   },
@@ -49,17 +49,17 @@ export const menuItems = [
       {
         label: 'Dashboard',
         href: '/admin/catalog',
-        permission: 'admin.catalog.view'
+        permission: 'catalog.dashboard.view'
       },
       {
         label: 'Products',
         href: '/admin/catalog/products',
-        permission: 'admin.catalog.products.manage'
+        permission: 'catalog.products.manage'
       },
       {
         label: 'Components',
         href: '/admin/catalog/components',
-        permission: 'admin.catalog.components.manage'
+        permission: 'catalog.components.manage'
       }
     ]
   },
@@ -70,12 +70,17 @@ export const menuItems = [
       {
         label: 'Dashboard',
         href: '/admin/support',
-        permission: 'admin.support.view'
+        permission: 'support.dashboard.view'
       },
       {
         label: 'Tickets',
         href: '/admin/support/tickets',
-        permission: 'admin.support.tickets.view'
+        permission: 'support.tickets.view'
+      },
+      {
+        label: 'Categories',
+        href: '/admin/support/categories',
+        permission: 'support.tickets.manage'
       }
     ]
   },
@@ -86,27 +91,27 @@ export const menuItems = [
       {
         label: 'Roles & Permissions',
         href: '/admin/roles',
-        permission: 'admin.roles.manage'
+        permission: 'core.roles.manage'
       },
       {
         label: 'Permission Groups',
         href: '/admin/permission-groups',
-        permission: 'admin.roles.manage_permissions'
+        permission: 'core.roles.manage_permissions'
       },
       {
         label: 'Plugins',
         href: '/admin/plugins',
-        permission: 'admin.plugins.view'
+        permission: 'core.plugins.view'
       },
       {
         label: 'Audit Logs',
         href: '/admin/audit-logs',
-        permission: 'admin.audit_logs.view'
+        permission: 'audit.logs.view'
       },
       {
         label: 'Analytics',
         href: '/admin/analytics',
-        permission: 'admin.analytics.view'
+        permission: 'reporting.analytics.view'
       }
     ]
   }

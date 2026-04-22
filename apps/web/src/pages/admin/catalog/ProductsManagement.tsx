@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Plus, Edit, Trash2, Package, Eye, Settings, X, Loader, AlertCircle, CheckCircle } from 'lucide-react';
-import { trpc as api } from '../../../api/trpc';
+import { catalogApi } from '../../../api/catalogApi';
 import { ProductBuilder, ProductFormData } from './components/ProductBuilder';
 import { ProductPreview } from './components/ProductPreview';
 
@@ -44,57 +45,34 @@ const Notification: React.FC<NotificationProps> = ({ message, type, onClose }) =
 };
 
 const ProductsManagement: React.FC = () => {
-  // Fetch products from the API
-  const { 
-    data: products, 
-    isLoading, 
+  const queryClient = useQueryClient();
+  const listKey = ['catalog', 'products', { isActive: true }] as const;
+
+  const {
+    data: products,
+    isLoading,
     error,
-    refetch 
-  } = api.catalog.listProducts.useQuery({
-    isActive: true
+    refetch,
+  } = useQuery({
+    queryKey: listKey,
+    queryFn: () => catalogApi.listProducts({ isActive: true }),
   });
 
-  // Get tRPC utils for cache invalidation
-  const utils = api.useUtils();
+  const invalidateProducts = () => queryClient.invalidateQueries({ queryKey: ['catalog', 'products'] });
 
-  // Delete product mutation
-  const deleteProduct = api.catalog.deleteProduct.useMutation({
+  const updateProduct = useMutation({
+    mutationFn: ({ id, data }: { id: string; data: Record<string, unknown> }) =>
+      catalogApi.updateProduct(id, data),
     onSuccess: () => {
-      utils.catalog.listProducts.invalidate();
-      showNotification('Product deleted successfully', 'success');
-    },
-    onError: (error) => {
-      console.error('Failed to delete product:', error);
-      showNotification('Failed to delete product: ' + error.message, 'error');
-    }
-  });
-
-  // Create product mutation
-  const createProduct = api.catalog.createProduct.useMutation({
-    onSuccess: () => {
-      utils.catalog.listProducts.invalidate();
-      setShowCreateModal(false);
-      setEditingProduct(null);
-      showNotification('Product created successfully', 'success');
-    },
-    onError: (error) => {
-      console.error('Failed to create product:', error);
-      showNotification('Failed to create product: ' + error.message, 'error');
-    }
-  });
-
-  // Update product mutation
-  const updateProduct = api.catalog.updateProduct.useMutation({
-    onSuccess: () => {
-      utils.catalog.listProducts.invalidate();
+      invalidateProducts();
       setShowCreateModal(false);
       setEditingProduct(null);
       showNotification('Product updated successfully', 'success');
     },
-    onError: (error) => {
-      console.error('Failed to update product:', error);
-      showNotification('Failed to update product: ' + error.message, 'error');
-    }
+    onError: (err: Error) => {
+      console.error('Failed to update product:', err);
+      showNotification('Failed to update product: ' + err.message, 'error');
+    },
   });
 
   // State management
@@ -199,18 +177,12 @@ const ProductsManagement: React.FC = () => {
       };
 
       if (editingProduct) {
-        // Update existing product
-        await api.catalog.updateProduct.mutate({
-          id: editingProduct.id,
-          data: productData
-        });
+        await catalogApi.updateProduct(editingProduct.id, productData);
       } else {
-        // Create new product
-        await api.catalog.createProduct.mutate(productData);
+        await catalogApi.createProduct(productData);
       }
 
-      // Refresh the products list
-      await utils.catalog.listProducts.invalidate();
+      await invalidateProducts();
       
       // Close the modal and show success message
       setShowCreateModal(false);
@@ -231,9 +203,9 @@ const ProductsManagement: React.FC = () => {
   const handleDeleteProduct = (productId: string) => {
     if (window.confirm('Are you sure you want to archive this product? Archived products will no longer be available for purchase but existing subscriptions will remain active.')) {
       // Instead of deleting, we'll set isActive to false (soft delete)
-      updateProduct.mutate({ 
-        id: productId, 
-        data: { isActive: false } 
+      updateProduct.mutate({
+        id: productId,
+        data: { isActive: false },
       });
     }
   };
@@ -290,7 +262,7 @@ const ProductsManagement: React.FC = () => {
           <div className="text-center">
             <AlertCircle className="w-12 h-12 text-red-500 mx-auto mb-4" />
             <h3 className="text-lg font-medium text-gray-900 mb-2">Error Loading Products</h3>
-            <p className="text-gray-600 mb-4">{error.message}</p>
+            <p className="text-gray-600 mb-4">{error instanceof Error ? error.message : 'Error'}</p>
             <button
               onClick={() => refetch()}
               className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors"
@@ -386,7 +358,7 @@ const ProductsManagement: React.FC = () => {
               <div>
                 <p className="text-sm text-gray-600 mb-1">Tags</p>
                 <div className="flex flex-wrap gap-1">
-                  {product.tags.map((tag) => (
+                  {(product.tags || []).map((tag: string) => (
                     <span key={tag} className="px-2 py-1 bg-blue-100 text-blue-800 text-xs rounded-full">
                       {tag}
                     </span>
@@ -397,10 +369,14 @@ const ProductsManagement: React.FC = () => {
               <div>
                 <p className="text-sm text-gray-600 mb-1">Components ({product.components.length})</p>
                 <div className="space-y-1">
-                  {product.components.map((component, index) => (
+                  {product.components.map((component: Record<string, unknown>, index: number) => (
                     <div key={index} className="flex items-center justify-between text-xs">
-                      <span className="text-gray-700">{component.name}</span>
-                      {getPricingModelBadge(component.pricing)}
+                      <span className="text-gray-700">
+                        {(component.component as Record<string, unknown>)?.name ?? component.name}
+                      </span>
+                      {getPricingModelBadge(
+                        (component.pricingModel as string) || (component.pricing as string),
+                      )}
                     </div>
                   ))}
                 </div>
@@ -439,7 +415,7 @@ const ProductsManagement: React.FC = () => {
                 </button>
                 <button 
                   onClick={() => handleDeleteProduct(product.id)}
-                  disabled={deleteProduct.isLoading}
+                  disabled={updateProduct.isPending}
                   className="p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors disabled:opacity-50"
                 >
                   <Trash2 className="h-4 w-4" />
