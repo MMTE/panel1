@@ -15,15 +15,16 @@
     "lint": "eslint src --ext .ts"
   },
   "dependencies": {
-    "@panel1/types": "*",
-    "@panel1/core": "*",
     "@hono/zod-openapi": "^0.18.4",
+    "@panel1/core": "*",
+    "@panel1/types": "*",
     "drizzle-orm": "^0.29.3",
     "hono": "^4.7.5",
-    "zod": "^3.22.4",
-    "pdfkit": "^0.15.0"
+    "pdfkit": "^0.15.0",
+    "zod": "^3.22.4"
   },
   "devDependencies": {
+    "@electric-sql/pglite": "^0.2.17",
     "typescript": "^5.5.3"
   }
 }
