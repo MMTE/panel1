@@ -59,9 +59,10 @@ export const paymentAttempts = pgTable('payment_attempts', {
   gatewayName: varchar('gateway_name', { length: 50 }).notNull(),
   attemptNumber: integer('attempt_number').notNull(),
   status: varchar('status', { length: 50 }).notNull(),
-  processingTimeMs: integer('processing_time_ms'),
+  errorCode: varchar('error_code', { length: 50 }),
   errorMessage: text('error_message'),
   gatewayResponse: jsonb('gateway_response').$type<Record<string, any>>(),
+  processingTimeMs: integer('processing_time_ms'),
   createdAt: timestamp('created_at').notNull().defaultNow()
 });
 
@@ -94,3 +95,6 @@ export const paymentAttemptsRelations = relations(paymentAttempts, ({ one }) => 
 
 export type Payment = typeof payments.$inferSelect;
 export type NewPayment = typeof payments.$inferInsert;
+
+export type PaymentAttempt = typeof paymentAttempts.$inferSelect;
+export type NewPaymentAttempt = typeof paymentAttempts.$inferInsert;

@@ -40,13 +40,10 @@ export const pricingModelEnum = pgEnum('pricing_model', [
   'CUSTOM'
 ]);
 
-export const billingIntervalEnum = pgEnum('billing_interval', [
-  'HOURLY',
-  'DAILY',
-  'WEEKLY',
-  'MONTHLY',
-  'YEARLY'
-]);
+// `billingIntervalEnum` is defined in ./plans (canonical home) and imported
+// here. It was previously redefined in this file, which caused an `export *`
+// conflict in the schema barrel (TS2308).
+import { billingIntervalEnum } from './plans';
 
 // Components table for storing component definitions
 export const components = pgTable('components', {

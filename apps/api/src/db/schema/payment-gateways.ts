@@ -1,4 +1,4 @@
-import { pgTable, uuid, text, timestamp, jsonb, pgEnum, boolean, varchar, integer } from 'drizzle-orm/pg-core';
+import { pgTable, uuid, text, timestamp, jsonb, pgEnum, boolean, varchar } from 'drizzle-orm/pg-core';
 import { relations } from 'drizzle-orm';
 import { tenants } from './tenants';
 
@@ -47,18 +47,11 @@ export const paymentGatewayConfigs = pgTable('payment_gateway_configs', {
   updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow(),
 });
 
-export const paymentAttempts = pgTable('payment_attempts', {
-  id: uuid('id').primaryKey().defaultRandom(),
-  paymentId: uuid('payment_id').references(() => payments.id).notNull(),
-  gatewayName: text('gateway_name').notNull(),
-  attemptNumber: integer('attempt_number').default(1),
-  status: text('status').notNull(), // 'pending', 'success', 'failed', 'cancelled'
-  errorCode: text('error_code'),
-  errorMessage: text('error_message'),
-  gatewayResponse: jsonb('gateway_response'),
-  processingTimeMs: integer('processing_time_ms'),
-  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
-});
+// `paymentAttempts` table, `paymentAttemptsRelations`, and `PaymentAttempt`/
+// `NewPaymentAttempt` types live in ./payments (canonical home — an attempt
+// belongs to a payment, and the payments-side `many(paymentAttempts)` relation
+// is defined there). They were previously duplicated here, which caused
+// `export *` conflicts in the schema barrel (TS2308).
 
 // Relations
 export const paymentGatewayConfigsRelations = relations(paymentGatewayConfigs, ({ one }) => ({
@@ -68,18 +61,6 @@ export const paymentGatewayConfigsRelations = relations(paymentGatewayConfigs, (
   }),
 }));
 
-export const paymentAttemptsRelations = relations(paymentAttempts, ({ one }) => ({
-  payment: one(payments, {
-    fields: [paymentAttempts.paymentId],
-    references: [payments.id],
-  }),
-}));
-
 // Types
 export type PaymentGatewayConfig = typeof paymentGatewayConfigs.$inferSelect;
 export type NewPaymentGatewayConfig = typeof paymentGatewayConfigs.$inferInsert;
-export type PaymentAttempt = typeof paymentAttempts.$inferSelect;
-export type NewPaymentAttempt = typeof paymentAttempts.$inferInsert;
-
-// Import payments table (we'll need to add this import in the existing payments.ts)
-import { payments } from './payments'; 

@@ -3,7 +3,18 @@ import { relations } from 'drizzle-orm';
 import { tenants } from './tenants';
 import { subscriptions } from './subscriptions';
 
-export const billingIntervalEnum = pgEnum('billing_interval', ['MONTHLY', 'YEARLY', 'WEEKLY', 'DAILY']);
+// Canonical home of the `billing_interval` pgEnum. catalog.ts imports this
+// rather than redefining it (it previously did, which caused an `export *`
+// conflict in the schema barrel — TS2308). The label set is the union of the
+// two former definitions: plans.ts had MONTHLY/YEARLY/WEEKLY/DAILY and
+// catalog.ts additionally had HOURLY; all five are kept.
+export const billingIntervalEnum = pgEnum('billing_interval', [
+  'MONTHLY',
+  'YEARLY',
+  'WEEKLY',
+  'DAILY',
+  'HOURLY'
+]);
 
 export const plans = pgTable('plans', {
   id: uuid('id').primaryKey().defaultRandom(),
