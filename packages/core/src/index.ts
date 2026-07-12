@@ -41,3 +41,14 @@ export { createRequirePermissionMiddleware } from './middleware/requirePermissio
 export type { CreateRequirePermissionMiddlewareOptions } from './middleware/requirePermission.js';
 export { createPathPrefixSkipPredicate } from './middleware/public.js';
 export type { Panel1AuthUser, Panel1UserPermissionContext } from './middleware/types.js';
+
+// D2 money core — integer minor-units helpers. See ./money.ts.
+export {
+  EXPONENT,
+  toMinor,
+  fromMinor,
+  add as addMinor,
+  sub as subMinor,
+  unknownCurrencyError,
+  UnknownCurrencyError,
+} from './money.js';
