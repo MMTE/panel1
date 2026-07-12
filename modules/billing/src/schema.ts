@@ -1,4 +1,5 @@
 import { pgTable, uuid, text, integer, decimal, timestamp, pgEnum, jsonb, index, unique } from 'drizzle-orm/pg-core';
+import { ledgerSchema } from './ledger/schema.js';
 
 export const invoiceStatusEnum = pgEnum('invoice_status', ['DRAFT', 'PENDING', 'PAID', 'OVERDUE', 'CANCELLED']);
 
@@ -80,6 +81,7 @@ export const billingSchema = {
   invoiceItems,
   invoiceCounters,
   dunningAttempts,
+  ...ledgerSchema,
 };
 
 export type Invoice = typeof invoices.$inferSelect;
