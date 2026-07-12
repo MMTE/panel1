@@ -5,31 +5,18 @@ import { createExpressMiddleware } from '@trpc/server/adapters/express';
 import { Hono } from 'hono';
 import { appRouter } from './routers/index';
 import { createContext } from './trpc/context';
-import { jobProcessor } from './lib/jobs/JobProcessor';
-import { initializeEmailService } from './lib/email';
-import { componentProviderRegistry } from './lib/catalog/ComponentProviderRegistry';
-import { setPanel1CatalogRuntime } from './lib/catalog/catalogRuntime.js';
-import { ComponentManagementService } from './lib/components/ComponentManagementService';
-import { ComponentLifecycleService } from './lib/components/ComponentLifecycleService';
-import { CpanelPlugin } from './lib/provisioning/plugins/CpanelPlugin';
-import { DomainComponentHandler } from './lib/domains/DomainComponentHandler';
-import { SslComponentHandler } from './lib/ssl/SslComponentHandler';
 
-import { PluginManager } from './lib/plugins/PluginManager';
-import { logger } from './lib/logging/Logger';
-import { bootModules, shutdown, type BootResult, RetryManager } from '@panel1/core';
+import { bootModules, shutdown, type BootResult, RetryManager, logger, EncryptionService } from '@panel1/core';
 import type { ModuleDefinition } from '@panel1/types';
 import { modules as moduleList, getDatabaseUrl, getRedisOptions } from './config';
 import { db } from './db';
 import { createEventOutboxHooks } from './lib/core/eventOutbox.js';
 import { apiBearerAuthMiddleware, apiTenantMiddleware, apiRequirePermission } from './hono/security.js';
-import { emailService } from './lib/email/EmailService';
-import { encryptionService } from './lib/security/EncryptionService';
 import { seedModulePermissionsFromDefinitions } from './lib/permissions/seedModulePermissions';
 import { permissionManager } from './lib/auth/PermissionManager';
-import { installLegacyBridgeBeforeJobSchedulerStart } from './lib/core/legacyBridge.js';
 
 const moduleRetryManager = new RetryManager();
+const encryptionService = new EncryptionService();
 
 const app = express();
 const PORT = process.env.API_PORT || 3001;
@@ -118,21 +105,9 @@ async function bootModularSystem(): Promise<BootResult> {
       outbox: createEventOutboxHooks(db),
     },
     hostInfra: {
-      email: {
-        sendEmail: async (opts) => {
-          await emailService.sendEmail({
-            to: opts.to,
-            subject: opts.subject,
-            html: opts.html,
-            text: opts.text,
-            metadata: opts.metadata,
-          });
-        },
-      },
       encryption: encryptionService,
       retry: moduleRetryManager,
     },
-    beforeJobSchedulerStart: installLegacyBridgeBeforeJobSchedulerStart,
   });
 
   await seedModulePermissionsFromDefinitions(moduleDefs);
@@ -186,45 +161,11 @@ async function bootModularSystem(): Promise<BootResult> {
   return result;
 }
 
-async function initializeServices() {
-  try {
-    const pluginManager = PluginManager.getInstance();
-    await pluginManager.initialize();
-
-    await componentProviderRegistry.initialize();
-
-    const lifecycleService = ComponentLifecycleService.getInstance();
-
-    const cpanelPlugin = new CpanelPlugin();
-    lifecycleService.registerHandler('cpanel', cpanelPlugin);
-
-    const domainHandler = new DomainComponentHandler();
-    lifecycleService.registerHandler('domain-manager', domainHandler);
-
-    const sslHandler = new SslComponentHandler();
-    lifecycleService.registerHandler('ssl-manager', sslHandler);
-
-    await lifecycleService.start();
-
-    setPanel1CatalogRuntime({
-      providerRegistry: componentProviderRegistry,
-      componentManagement: ComponentManagementService.getInstance(),
-      componentLifecycle: lifecycleService,
-    });
-
-    console.log('  Legacy services initialized');
-  } catch (error) {
-    logger.error('Failed to initialize legacy services:', error);
-    process.exit(1);
-  }
-}
-
 app.listen(PORT, async () => {
   console.log(`Panel1 API Server starting on http://localhost:${PORT}`);
   console.log(`  tRPC endpoint: http://localhost:${PORT}/trpc`);
 
   try {
-    await initializeEmailService();
     bootResult = await bootModularSystem();
     console.log(`  Module system booted (${bootResult.modules.length} modules)`);
     await bootResult.eventBus.emit('app.started', { timestamp: new Date() });
@@ -232,7 +173,6 @@ app.listen(PORT, async () => {
     console.error('Module boot failed:', error);
   }
 
-  await initializeServices();
   console.log('Panel1 API Server ready');
 });
 
@@ -242,9 +182,6 @@ process.on('SIGTERM', async () => {
     await bootResult.eventBus.emit('app.stopping', { reason: 'SIGTERM' });
     await shutdown(bootResult);
   }
-  const lifecycleService = ComponentLifecycleService.getInstance();
-  await lifecycleService.stop();
-  await jobProcessor.shutdown();
   process.exit(0);
 });
 
@@ -254,8 +191,5 @@ process.on('SIGINT', async () => {
     await bootResult.eventBus.emit('app.stopping', { reason: 'SIGINT' });
     await shutdown(bootResult);
   }
-  const lifecycleService = ComponentLifecycleService.getInstance();
-  await lifecycleService.stop();
-  await jobProcessor.shutdown();
   process.exit(0);
 });

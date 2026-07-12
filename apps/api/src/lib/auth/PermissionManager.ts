@@ -10,7 +10,7 @@ import {
   roles as rolesTable,
 } from '../../db/schema';
 import { eq, and } from 'drizzle-orm';
-import { logger } from '../logging/Logger';
+import { logger } from '@panel1/core';
 import { Role, ResourceType, PermissionAction, type Permission } from './types';
 
 export { Role, ResourceType, PermissionAction } from './types';

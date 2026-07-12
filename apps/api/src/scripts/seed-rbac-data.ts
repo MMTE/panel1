@@ -4,7 +4,7 @@ import { db } from '../db';
 import { roles, permissions, rolePermissions, roleHierarchy } from '../db/schema/roles';
 import { Role, ResourceType, PermissionAction } from '../lib/auth/types';
 import { nanoid } from 'nanoid';
-import { logger } from '../lib/logging/Logger';
+import { logger } from '@panel1/core';
 
 async function seedRoles() {
   const defaultRoles = [

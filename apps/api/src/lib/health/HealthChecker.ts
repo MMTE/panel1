@@ -1,4 +1,4 @@
-import { logger } from '../logging/Logger';
+import { logger } from '@panel1/core';
 import { db } from '../../db';
 
 export interface HealthCheckResult {

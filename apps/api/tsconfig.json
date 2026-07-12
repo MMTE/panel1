@@ -22,8 +22,8 @@
     
     // TODO: Re-enable these in v0.1.1
     // These are temporarily inherited as false from root tsconfig
-    // "strict": true,
-    // "noImplicitAny": true,
+    "strict": true,
+    "noImplicitAny": true,
     // "strictNullChecks": true,
     // "strictFunctionTypes": true,
     // "strictBindCallApply": true,

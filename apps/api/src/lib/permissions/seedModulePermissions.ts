@@ -4,7 +4,7 @@ import { eq } from 'drizzle-orm';
 import { db } from '../../db';
 import { permissions } from '../../db/schema/roles';
 import { PermissionAction, ResourceType } from '../auth/types';
-import { logger } from '../logging/Logger';
+import { logger } from '@panel1/core';
 
 /** Map first segment of `{module}.{resource}.{action}` to a coarse RBAC resource bucket. */
 const MODULE_TO_RESOURCE: Record<string, ResourceType> = {

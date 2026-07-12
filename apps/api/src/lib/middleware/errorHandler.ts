@@ -1,6 +1,5 @@
 import { TRPCError } from '@trpc/server';
-import { Panel1Error } from '../errors';
-import { logger } from '../logging/Logger';
+import { Panel1Error, logger } from '@panel1/core';
 
 export function handleError(error: unknown, context?: Record<string, any>): TRPCError {
   const correlationId = context?.correlationId || `err_${Date.now()}`;

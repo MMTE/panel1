@@ -7,7 +7,7 @@
 import { db } from '../db';
 import { permissions } from '../db/schema/roles';
 import { eq } from 'drizzle-orm';
-import { logger } from '../lib/logging/Logger';
+import { logger } from '@panel1/core';
 
 const LEGACY_TO_CANONICAL: Record<string, string> = {
   'admin.dashboard.view': 'core.dashboard.view',

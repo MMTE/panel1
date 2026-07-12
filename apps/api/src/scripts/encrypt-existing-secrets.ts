@@ -2,8 +2,10 @@
 
 import { db } from '../db';
 import { paymentGatewayConfigs } from '../db/schema';
-import { encryptionService } from '../lib/security/EncryptionService';
+import { EncryptionService } from '@panel1/core';
 import { eq } from 'drizzle-orm';
+
+const encryptionService = new EncryptionService();
 
 /**
  * Migration script to encrypt existing plaintext credentials

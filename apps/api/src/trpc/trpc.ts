@@ -2,7 +2,7 @@ import { initTRPC, TRPCError } from '@trpc/server';
 import type { Context } from './context';
 import { permissionManager, type ResourceContext, ResourceType } from '../lib/auth/PermissionManager';
 import { createErrorHandlingMiddleware } from '../lib/middleware/errorHandler';
-import { logger } from '../lib/logging/Logger';
+import { logger } from '@panel1/core';
 
 // Initialize tRPC
 const t = initTRPC.context<Context>().create();
