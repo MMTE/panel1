@@ -4,9 +4,14 @@ loadEnv();
 export const modules = [
   '@panel1/mod-audit',
   '@panel1/mod-support',
-  '@panel1/mod-catalog',
+  // '@panel1/mod-catalog',   // DEFERRED (Phase C / roadmap Issue 3.1): module imports the
+  //                          // deleted host runtime apps/api/src/lib/catalog/catalogRuntime.ts
+  //                          // (ComponentProviderRegistry/Lifecycle/Management). Re-enable once
+  //                          // the component-lifecycle machinery is migrated into the module/core.
   '@panel1/mod-payments',
   '@panel1/mod-billing',
+  // '@panel1/mod-subscriptions',  // DEFERRED (Phase E): renewal engine not yet idempotent.
+  // '@panel1/mod-provisioning',   // DEFERRED (Phase G): cPanel adapter still a stub.
 ];
 
 export function getDatabaseUrl(): string {

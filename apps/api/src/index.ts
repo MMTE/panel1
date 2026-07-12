@@ -18,6 +18,11 @@ import { permissionManager } from './lib/auth/PermissionManager';
 const moduleRetryManager = new RetryManager();
 const encryptionService = new EncryptionService();
 
+// Module-level boot status — read by /health so it reflects the real async boot state.
+// States: 'booting' (initial) -> 'ok' | 'failed' once bootModularSystem() settles.
+type BootStatus = { phase: 'booting' | 'ok' | 'failed'; moduleCount: number; failedImports: { name: string; error: string }[] };
+let bootStatus: BootStatus = { phase: 'booting', moduleCount: 0, failedImports: [] };
+
 const app = express();
 const PORT = process.env.API_PORT || 3001;
 
@@ -70,9 +75,25 @@ app.use(cors({
 }));
 
 app.get('/health', (req, res) => {
-  res.json({
+  const timestamp = new Date().toISOString();
+  if (bootStatus.phase === 'booting') {
+    res.status(503).json({ status: 'booting', timestamp });
+    return;
+  }
+  if (bootStatus.phase === 'failed') {
+    res.status(503).json({
+      status: 'failed',
+      modules: bootStatus.moduleCount,
+      failures: bootStatus.failedImports,
+      timestamp,
+    });
+    return;
+  }
+  res.status(200).json({
     status: 'ok',
-    timestamp: new Date().toISOString(),
+    modules: bootStatus.moduleCount,
+    failedImports: bootStatus.failedImports,
+    timestamp,
     version: process.env.npm_package_version || '0.1.0'
   });
 });
@@ -88,12 +109,26 @@ app.use(
 
 let bootResult: BootResult | null = null;
 
-async function bootModularSystem(): Promise<BootResult> {
+async function bootModularSystem(): Promise<{ result: BootResult; failedImports: { name: string; error: string }[] }> {
   const moduleDefs: ModuleDefinition[] = [];
+  const importFailures: { name: string; error: string }[] = [];
 
   for (const pkgName of moduleList) {
-    const mod = await import(pkgName);
-    moduleDefs.push(mod.default);
+    try {
+      const mod = await import(pkgName);
+      moduleDefs.push(mod.default);
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : String(error);
+      logger.error(`Module import failed, skipping: ${pkgName}`, { pkgName, error: msg });
+      importFailures.push({ name: pkgName, error: msg });
+    }
+  }
+
+  if (moduleDefs.length === 0) {
+    throw new Error(`All ${moduleList.length} module imports failed; cannot boot`);
+  }
+  if (importFailures.length > 0) {
+    logger.warn(`Boot proceeding with ${moduleDefs.length}/${moduleList.length} modules; failed: ${importFailures.map(f => f.name).join(', ')}`);
   }
 
   const result = await bootModules({
@@ -158,7 +193,7 @@ async function bootModularSystem(): Promise<BootResult> {
   });
 
   console.log(`  Module routes mounted: ${[...result.moduleRoutes.keys()].map(n => `/api/${n}/`).join(', ')}`);
-  return result;
+  return { result, failedImports: importFailures };
 }
 
 app.listen(PORT, async () => {
@@ -166,11 +201,15 @@ app.listen(PORT, async () => {
   console.log(`  tRPC endpoint: http://localhost:${PORT}/trpc`);
 
   try {
-    bootResult = await bootModularSystem();
-    console.log(`  Module system booted (${bootResult.modules.length} modules)`);
-    await bootResult.eventBus.emit('app.started', { timestamp: new Date() });
+    const { result, failedImports } = await bootModularSystem();
+    bootResult = result;
+    bootStatus = { phase: 'ok', moduleCount: result.modules.length, failedImports };
+    console.log(`  Module system booted (${result.modules.length} modules)`);
+    await result.eventBus.emit('app.started', { timestamp: new Date() });
   } catch (error) {
-    console.error('Module boot failed:', error);
+    const msg = error instanceof Error ? error.message : String(error);
+    logger.error('Module boot failed', { error: msg });
+    bootStatus = { phase: 'failed', moduleCount: bootStatus.moduleCount, failedImports: [{ name: 'boot', error: msg }] };
   }
 
   console.log('Panel1 API Server ready');
