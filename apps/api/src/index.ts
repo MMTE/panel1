@@ -19,9 +19,18 @@ const moduleRetryManager = new RetryManager();
 const encryptionService = new EncryptionService();
 
 // Module-level boot status — read by /health so it reflects the real async boot state.
-// States: 'booting' (initial) -> 'ok' | 'failed' once bootModularSystem() settles.
-type BootStatus = { phase: 'booting' | 'ok' | 'failed'; moduleCount: number; failedImports: { name: string; error: string }[] };
-let bootStatus: BootStatus = { phase: 'booting', moduleCount: 0, failedImports: [] };
+// States: 'booting' (initial) -> 'ok' | 'degraded' | 'failed' once bootModularSystem() settles.
+// `booted` is the count of modules whose setup() actually succeeded (core's BootResult.bootedModules.length),
+// NOT the registered count. `failures` aggregates BOTH import-time and setup-time failures with a `phase`
+// tag so monitors can distinguish them. status 'ok' requires zero failures; 'degraded' = partial boot
+// (some failed, at least one booted); 'failed' = zero booted or bootModularSystem() threw.
+type BootFailure = { name: string; error: string; phase: 'import' | 'setup' };
+type BootStatus = {
+  phase: 'booting' | 'ok' | 'degraded' | 'failed';
+  booted: number;
+  failures: BootFailure[];
+};
+let bootStatus: BootStatus = { phase: 'booting', booted: 0, failures: [] };
 
 const app = express();
 const PORT = process.env.API_PORT || 3001;
@@ -76,25 +85,31 @@ app.use(cors({
 
 app.get('/health', (req, res) => {
   const timestamp = new Date().toISOString();
+  const version = process.env.npm_package_version || '0.1.0';
   if (bootStatus.phase === 'booting') {
-    res.status(503).json({ status: 'booting', timestamp });
+    // 503 while boot is in progress — every body uses the same `failures` key (empty here).
+    res.status(503).json({ status: 'booting', booted: bootStatus.booted, failures: bootStatus.failures, timestamp });
     return;
   }
   if (bootStatus.phase === 'failed') {
+    // 503 when zero modules booted or bootModularSystem() threw.
     res.status(503).json({
       status: 'failed',
-      modules: bootStatus.moduleCount,
-      failures: bootStatus.failedImports,
+      booted: bootStatus.booted,
+      failures: bootStatus.failures,
       timestamp,
+      version,
     });
     return;
   }
+  // 200 for both 'ok' (no failures) and 'degraded' (partial boot) — a degraded service should not
+  // fail its own healthcheck into the ground, but the `status` field lets monitors alert on `degraded`.
   res.status(200).json({
-    status: 'ok',
-    modules: bootStatus.moduleCount,
-    failedImports: bootStatus.failedImports,
+    status: bootStatus.phase, // 'ok' | 'degraded'
+    booted: bootStatus.booted,
+    failures: bootStatus.failures,
     timestamp,
-    version: process.env.npm_package_version || '0.1.0'
+    version,
   });
 });
 
@@ -109,9 +124,9 @@ app.use(
 
 let bootResult: BootResult | null = null;
 
-async function bootModularSystem(): Promise<{ result: BootResult; failedImports: { name: string; error: string }[] }> {
+async function bootModularSystem(): Promise<{ result: BootResult; failedImports: BootFailure[] }> {
   const moduleDefs: ModuleDefinition[] = [];
-  const importFailures: { name: string; error: string }[] = [];
+  const importFailures: BootFailure[] = [];
 
   for (const pkgName of moduleList) {
     try {
@@ -120,7 +135,7 @@ async function bootModularSystem(): Promise<{ result: BootResult; failedImports:
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
       logger.error(`Module import failed, skipping: ${pkgName}`, { pkgName, error: msg });
-      importFailures.push({ name: pkgName, error: msg });
+      importFailures.push({ name: pkgName, error: msg, phase: 'import' });
     }
   }
 
@@ -203,13 +218,26 @@ app.listen(PORT, async () => {
   try {
     const { result, failedImports } = await bootModularSystem();
     bootResult = result;
-    bootStatus = { phase: 'ok', moduleCount: result.modules.length, failedImports };
-    console.log(`  Module system booted (${result.modules.length} modules)`);
+    // I1: core tolerates per-module setup() failures (returned in result.failedModules) without throwing.
+    // Combine them with import-time failures so /health can't report a false-positive 'ok' when a module
+    // loaded but failed to set up. The booted count comes from result.bootedModules.length (the modules
+    // whose setup() actually succeeded), NOT result.modules.length (the registered count).
+    const setupFailures: BootFailure[] = result.failedModules.map((f) => ({
+      name: f.name,
+      error: f.error instanceof Error ? f.error.message : String(f.error),
+      phase: 'setup',
+    }));
+    const failures = [...failedImports, ...setupFailures];
+    const booted = result.bootedModules.length;
+    const phase = failures.length === 0 ? 'ok' : booted > 0 ? 'degraded' : 'failed';
+    bootStatus = { phase, booted, failures };
+    console.log(`  Module system booted (${booted}/${result.modules.length} booted, ${failures.length} failed)`);
     await result.eventBus.emit('app.started', { timestamp: new Date() });
   } catch (error) {
     const msg = error instanceof Error ? error.message : String(error);
     logger.error('Module boot failed', { error: msg });
-    bootStatus = { phase: 'failed', moduleCount: bootStatus.moduleCount, failedImports: [{ name: 'boot', error: msg }] };
+    // bootModularSystem() threw (e.g. all imports failed, dependency cycle, infra error) — zero modules booted.
+    bootStatus = { phase: 'failed', booted: 0, failures: [{ name: 'boot', error: msg, phase: 'setup' }] };
   }
 
   console.log('Panel1 API Server ready');
