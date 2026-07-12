@@ -2,11 +2,14 @@ import type { CreateExpressContextOptions } from '@trpc/server/adapters/express'
 import { getSessionByToken, type AuthUser } from '../lib/auth.js';
 import { db } from '../db/index';
 import { permissionManager } from '../lib/auth/PermissionManager';
+import { getClientIp } from '../lib/auth/rateLimiter.js';
 
 export interface Context {
   db: typeof db;
   user: AuthUser | null;
   tenantId: string | null;
+  /** Best-effort client IP for rate-limiting/security logging. */
+  ip: string;
   input?: unknown;
 }
 
@@ -37,5 +40,6 @@ export async function createContext({
     db,
     user,
     tenantId,
+    ip: getClientIp(req),
   };
 }

@@ -19,6 +19,7 @@ import {
 } from '../lib/auth/PermissionManager.js';
 import { roles, permissions, rolePermissions, roleHierarchy, userRoles, permissionGroups, permissionGroupItems } from '../db/schema/roles';
 import { nanoid } from 'nanoid';
+import { authRateLimiter } from '../lib/auth/rateLimiter.js';
 function userPermissionContext(ctx: {
   user: { id: string; role: string; tenantId?: string; clientId?: string | null };
 }): UserPermissionContext {
@@ -82,7 +83,18 @@ export const authRouter = router({
       email: z.string().email(),
       password: z.string().min(6),
     }))
-    .mutation(async ({ input }) => {
+    .mutation(async ({ input, ctx }) => {
+      // Rate limit by client IP to blunt brute-force / credential stuffing (R13).
+      // In-memory: per-process, resets on restart — see auth/rateLimiter.ts.
+      const rl = authRateLimiter.consume(ctx.ip);
+      if (!rl.allowed) {
+        throw new TRPCError({
+          code: 'TOO_MANY_REQUESTS',
+          message: 'Too many login attempts',
+          cause: { retryAfter: rl.retryAfterSec },
+        });
+      }
+
       const user = await authenticateUser(input.email, input.password);
       
       if (!user) {
@@ -112,7 +124,17 @@ export const authRouter = router({
       lastName: z.string().optional(),
       tenantId: z.string().optional(),
     }))
-    .mutation(async ({ input }) => {
+    .mutation(async ({ input, ctx }) => {
+      // Same IP rate limit as signIn — registration is also an abuse vector (R13).
+      const rl = authRateLimiter.consume(ctx.ip);
+      if (!rl.allowed) {
+        throw new TRPCError({
+          code: 'TOO_MANY_REQUESTS',
+          message: 'Too many login attempts',
+          cause: { retryAfter: rl.retryAfterSec },
+        });
+      }
+
       try {
         const user = await registerUser({
           email: input.email,

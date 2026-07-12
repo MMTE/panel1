@@ -14,6 +14,18 @@ import { createEventOutboxHooks } from './lib/core/eventOutbox.js';
 import { apiBearerAuthMiddleware, apiTenantMiddleware, apiRequirePermission } from './hono/security.js';
 import { seedModulePermissionsFromDefinitions } from './lib/permissions/seedModulePermissions';
 import { permissionManager } from './lib/auth/PermissionManager';
+import {
+  makeCorsOriginVerifier,
+  buildConnectSrc,
+  buildScriptSrc,
+} from './lib/security/contentPolicy.js';
+
+// Security policy inputs resolved once at boot (R13).
+const securityPolicyInput = {
+  nodeEnv: process.env.NODE_ENV,
+  corsOrigin: process.env.CORS_ORIGIN,
+  apiOrigin: process.env.API_ORIGIN,
+};
 
 const moduleRetryManager = new RetryManager();
 const encryptionService = new EncryptionService();
@@ -36,46 +48,25 @@ const app = express();
 const PORT = process.env.API_PORT || 3001;
 
 // Security middleware
+// CSP/CORS are env-driven (R13): see lib/security/contentPolicy.ts. CSP drops
+// 'unsafe-eval' entirely; connectSrc + CORS allowlist come from API_ORIGIN /
+// CORS_ORIGIN, with localhost permitted only when NODE_ENV=development.
 app.use(helmet({
   crossOriginResourcePolicy: { policy: "cross-origin" },
   crossOriginOpenerPolicy: { policy: "same-origin" },
   contentSecurityPolicy: {
     directives: {
       defaultSrc: ["'self'"],
-      scriptSrc: ["'self'", "'unsafe-inline'", "'unsafe-eval'"],
+      scriptSrc: buildScriptSrc(securityPolicyInput),
       styleSrc: ["'self'", "'unsafe-inline'"],
       imgSrc: ["'self'", "data:", "blob:"],
-      connectSrc: ["'self'", "http://localhost:*", "ws://localhost:*"]
+      connectSrc: buildConnectSrc(securityPolicyInput)
     }
   }
 }));
 
 app.use(cors({
-  origin: (origin, callback) => {
-    const allowedOrigins = [
-      'http://localhost:3000',
-      'http://localhost:5173',
-      'http://localhost:5174',
-      'http://localhost:5175',
-      'http://localhost:8000',
-      'http://localhost:8080',
-      'http://127.0.0.1:5173',
-      'http://127.0.0.1:3000'
-    ];
-    if (process.env.NODE_ENV === 'development') {
-      const localhostRegex = /^http:\/\/localhost:\d+$/;
-      if (!origin || localhostRegex.test(origin) || allowedOrigins.includes(origin)) {
-        callback(null, true);
-        return;
-      }
-    } else {
-      if (!origin || allowedOrigins.includes(origin)) {
-        callback(null, true);
-        return;
-      }
-    }
-    callback(new Error('Not allowed by CORS'));
-  },
+  origin: makeCorsOriginVerifier(securityPolicyInput),
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization', 'X-TRPC', 'x-trpc-source'],

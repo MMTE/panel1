@@ -6,7 +6,23 @@ import { users, sessions, permissions, rolePermissions, type User, type NewUser,
 import { eq, and, gte, lt } from 'drizzle-orm';
 import { permissionManager } from './auth/PermissionManager.js';
 
-const JWT_SECRET = process.env.JWT_SECRET || 'your-super-secret-jwt-key';
+/**
+ * Fail-closed JWT secret: throws if unset or shorter than 32 chars.
+ * auth.ts is imported at boot (via trpc/context.ts), so this eager check crashes
+ * startup when the secret is missing/weak — intentional (R7).
+ */
+function resolveJwtSecret(): string {
+  const secret = process.env.JWT_SECRET;
+  if (!secret || secret.length < 32) {
+    throw new Error(
+      `JWT_SECRET must be set and at least 32 characters long (got ${secret ? secret.length : 0}).`
+    );
+  }
+  return secret;
+}
+
+const JWT_SECRET = resolveJwtSecret();
+
 const JWT_EXPIRES_IN = '7d';
 const SESSION_EXPIRES_IN = 7 * 24 * 60 * 60 * 1000; // 7 days in milliseconds
 
