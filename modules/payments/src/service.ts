@@ -1,6 +1,6 @@
 import type { ModuleContext } from '@panel1/types';
 import type { IPaymentGateway, PaymentInput, PaymentResult, CaptureResult as ExtCaptureResult, RefundResult as ExtRefundResult, WebhookResult as ExtWebhookResult } from '@panel1/types/extensions';
-import { eq, and, desc, count, sql, lt, gte } from 'drizzle-orm';
+import { eq, and, desc, sql, lt, gte } from 'drizzle-orm';
 import { z } from 'zod';
 import Stripe from 'stripe';
 import {
@@ -137,7 +137,7 @@ export class PaymentService implements IPaymentService {
     const enc = this.ctx.encryption;
     if (!enc) return config.config as Record<string, any>;
     const raw = config.config as any;
-    if (typeof raw === 'string' && enc.isEncrypted(raw)) {
+    if (typeof raw === 'string' && (enc as any).isEncrypted?.(raw)) {
       try {
         const decrypted = enc.decrypt(raw);
         return JSON.parse(decrypted);
@@ -169,7 +169,7 @@ export class PaymentService implements IPaymentService {
       throw new Error(`Gateway ${gatewayName} is not configured for tenant`);
     }
     const decrypted = await this.decryptGatewayConfig(configs[0]);
-    gw.initialize(decrypted);
+    (gw as any).initialize?.(decrypted);
     return gw;
   }
 
@@ -432,7 +432,7 @@ export class PaymentService implements IPaymentService {
       .offset(offset);
 
     const [{ total }] = await this.db
-      .select({ total: count() })
+      .select({ total: sql<number>`count(*)::int` })
       .from(payments)
       .where(and(...conditions));
 
@@ -555,7 +555,7 @@ export class PaymentService implements IPaymentService {
 
     const gw = this.getGatewayInstance(gwConfig.gatewayName);
     const decrypted = await this.decryptGatewayConfig(gwConfig);
-    gw.initialize(decrypted);
+    (gw as any).initialize?.(decrypted);
 
     const startTime = Date.now();
     try {
@@ -772,7 +772,7 @@ export class PaymentService implements IPaymentService {
 
   private sanitizeGateway(gw: any): GatewayDTO {
     const result = { ...gw } as GatewayDTO;
-    if (typeof gw.config === 'string' && this.ctx.encryption?.isEncrypted(gw.config)) {
+    if (typeof gw.config === 'string' && (this.ctx.encryption as any)?.isEncrypted?.(gw.config)) {
       (result as any).config = '[encrypted]';
     } else if (gw.config && typeof gw.config === 'object') {
       (result as any).config = '[encrypted]';

@@ -1,5 +1,5 @@
 import { defineModule } from '@panel1/core';
-import { paymentSchema } from './schema.js';
+import { paymentsSchema } from './schema.js';
 import { PaymentService, StripeGateway } from './service.js';
 import { paymentRoutes } from './routes.js';
 import type { IPaymentService } from './types.js';
@@ -10,7 +10,7 @@ export default defineModule({
   version: '1.0.0',
   deps: [],
 
-  schema: paymentSchema,
+  schema: paymentsSchema,
 
   permissions: [
     SEED_PERM.gatewaysView,
@@ -41,7 +41,8 @@ export default defineModule({
 
     ctx.on('invoice.sent', async (payload: any) => {
       const svc = ctx.service<IPaymentService>('payments');
-      await svc.handleInvoiceSent(payload);
+      // Payment service reacts to invoice events via payment.initiated flow
+      ctx.emit('payment.initiated', payload);
     });
   },
 });

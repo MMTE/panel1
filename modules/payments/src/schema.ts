@@ -73,7 +73,7 @@ export const paymentAttempts = pgTable('payment_attempts', {
   processingTimeMs: integer('processing_time_ms'),
   errorMessage: text('error_message'),
   gatewayResponse: jsonb('gateway_response').$type<Record<string, any>>(),
-  createdAt: timestamp('created_at').withTimezone({}).defaultNow(),
+  createdAt: timestamp('created_at').defaultNow(),
 }, (table) => ({
   paymentIdx: index('payment_attempts_payment_idx').on(table.paymentId),
 }));

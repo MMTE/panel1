@@ -1,5 +1,5 @@
 import type { ModuleContext } from '@panel1/types';
-import { eq, and, desc, count, sql, gte, lte, or, ilike, lt } from 'drizzle-orm';
+import { eq, and, desc, sql, gte, lte, or, ilike, lt } from 'drizzle-orm';
 import { invoices, invoiceItems, invoiceCounters, dunningAttempts } from './schema.js';
 import type { Invoice, InvoiceItem, InvoiceCounter } from './schema.js';
 import type {
@@ -123,7 +123,7 @@ export class BillingService implements IBillingService {
       .offset(offset);
 
     const [{ total }] = await this.db
-      .select({ total: count() })
+      .select({ total: sql<number>`count(*)::int` })
       .from(invoices)
       .where(and(...conditions));
 
@@ -309,7 +309,7 @@ export class BillingService implements IBillingService {
 
     for (const invoice of overdueInvoices) {
       const [existingAttempts] = await this.db
-        .select({ count: count() })
+        .select({ count: sql<number>`count(*)::int` })
         .from(dunningAttempts)
         .where(and(
           eq(dunningAttempts.invoiceId, invoice.id),
@@ -343,7 +343,7 @@ export class BillingService implements IBillingService {
 
   async getStats(tenantId: string): Promise<BillingStats> {
     const [totalResult] = await this.db
-      .select({ count: count() })
+      .select({ count: sql<number>`count(*)::int` })
       .from(invoices)
       .where(eq(invoices.tenantId, tenantId));
 

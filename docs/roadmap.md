@@ -1,6 +1,6 @@
 # Panel1 Migration Roadmap
 
-> Last updated: March 24, 2026
+> Last updated: April 22, 2026
 > Breaking changes: allowed (no public release yet)
 > Architecture reference: [`ARCHITECTURE.md`](../ARCHITECTURE.md) (authoritative, root-level)
 
@@ -12,8 +12,9 @@
 |-------|----------|-------------|
 | **Phase 0** | ✅ 100% | — |
 | **Phase 1** | ✅ 100% | — |
-| **Phase 2** | ✅ ~100% | 2.2 audit backend + 2.5 integration tests done; Phase 3 Revenue Path next |
-| **Phase 3–6** | 🔄 ~15% | 3.1 catalog module + REST + web rewire done; 3.2–3.6 next |
+| **Phase 2** | ✅ 100% | — |
+| **Phase 3** | ✅ ~85% | 3.1–3.5 modules scaffolded, legacy code purged; 3.6 per-module DB schema next |
+| **Phase 4–6** | 🔄 0% | Next: domains/ssl secondary modules |
 
 ---
 
@@ -25,10 +26,15 @@
 | **`packages/core`** | Loader, services, filters, events (BullMQ + outbox), jobs (BullMQ + cron fallback), middleware (auth/tenant/perm), errors, logger, email, encryption, resilience — all present. `createEmailService()` / `createEncryptionService()` factories (no singletons in core). `ctx.email`, `ctx.encryption`, `ctx.retry` all wired via `hostInfra`. |
 | **`packages/types`** | `ModuleContext` has `email?: EmailTransport`, `encryption?: EncryptionPort`, `retry?: RetryPort`. `ModuleJobOptions` includes `timeout`. |
 | **`modules/audit`** | 9 Hono endpoints, 3 tables. JSON/CSV exports on disk, download route, weekly `audit-cleanup` job (`runWeeklyMaintenance`). |
-| **`modules/support`** | 22 Hono endpoints, 9 tables. **2.1:** SLA metrics + stats grouping + escalation + stale-close crons implemented. Legacy `apps/api` support paths already absent (no extra delete). |
-| **`apps/api`** | Express + tRPC + Hono. **1.7 done:** legacy `EventService` forwards to core `EventBus`; `EventProcessor` + legacy `JobScheduler` removed; operational Bull queues in `OperationalQueues.ts`; legacy crons registered on core `JobScheduler` via `legacyBridge.ts`. `JobProcessor` + renewal/provisioning workers retained. |
-| **`apps/web`** | Hardcoded routes, tRPC client. Support pages rewired to REST (`supportApi`), audit pages rewired to REST (`auditApi`). `AuditLogger` uses REST. Remaining pages still tRPC. |
-| **Permissions** | Canonical `{module}.{resource}.{action}`. `PermissionManager` loads roles from DB (async `getAvailableRoles()`), no hardcoded permission list. `seedModulePermissionsFromDefinitions()` upserts module-declared perms after boot + `clearCache()`. `migrate-permissions.ts` script exists for legacy renames. |
+| **`modules/support`** | 22 Hono endpoints, 9 tables. SLA metrics + stats grouping + escalation + stale-close crons implemented. |
+| **`modules/catalog`** | `@panel1/mod-catalog` — products, plans, component providers, subscribed instances. Public storefront endpoint. Legacy `plans` table bridge. |
+| **`modules/billing`** | `@panel1/mod-billing` — invoice CRUD + items, PDF generation, dunning cycle automation, credit notes. 4 tables. `BillingService` implements `IBillingService`. |
+| **`modules/payments`** | `@panel1/mod-payments` — payment processing, gateway management, Stripe integration, refunds, webhooks. 3 tables. `PaymentService` implements `IPaymentService`. `StripeGatewayImpl` implements `IPaymentGateway`. |
+| **`modules/subscriptions`** | `@panel1/mod-subscriptions` — full subscription lifecycle, proration, plan changes, renewal/cancellation sweeps, trial support. 3 tables (`subscriptions`, `subscription_components`, `subscription_state_changes`). 8 events. Reacts to `payment.succeeded/failed`, `invoice.overdue`. |
+| **`modules/provisioning`** | `@panel1/mod-provisioning` — provider CRUD, service instance lifecycle, cPanel adapter, task queue with retries, health checks. 3 tables (`provisioning_providers`, `service_instances`, `provisioning_tasks`). 6 events. Reacts to `subscription.activated/suspended/terminated`. |
+| **`apps/api`** | Express + tRPC + Hono. **Legacy `lib/` directories removed:** `lib/invoice/`, `lib/payments/`, `lib/subscription/`, `lib/provisioning/`, `lib/dunning/`, `lib/email/`, `lib/errors/`, `lib/logging/`, `lib/security/`, `lib/resilience/` — all purged (~6800 lines deleted). `OperationalQueues.ts`, `legacyBridge.ts`, `JobProcessor` retained. |
+| **`apps/web`** | REST clients for all modules: `supportApi`, `auditApi`, `catalogApi`, `billingApi`, `provisioningApi`. Support + audit pages use REST. Remaining pages still tRPC. |
+| **Permissions** | Canonical `{module}.{resource}.{action}`. `PermissionManager` loads roles from DB (async `getAvailableRoles()`), no hardcoded permission list. `seedModulePermissionsFromDefinitions()` upserts module-declared perms after boot + `clearCache()`. |
 
 ---
 
@@ -105,7 +111,6 @@ All services in `packages/core/src/`, factory-based (no singletons in core):
 - [x] `apps/api/src/lib/email/EmailService.ts` + `lib/security/EncryptionService.ts` — thin re-exports using `create*()` from core
 
 **Deferred cleanup** (low priority, does not block anything):
-- [ ] Delete duplicate wrappers under `apps/api/src/lib/` (errors, logging, etc.) after full import audit
 - [ ] Point all remaining `apps/api/` imports at `@panel1/core` directly
 
 ---
@@ -170,7 +175,7 @@ All services in `packages/core/src/`, factory-based (no singletons in core):
      Support (#8)   Catalog (#9)  Domains+SSL (#10)  ←── Leaf migrations
 ```
 
-**NEXT**: Phase 2 (support/audit E2E)
+**NEXT**: Phase 4 (domains/ssl secondary modules)
 
 ---
 
@@ -251,21 +256,20 @@ Goal: first fully credible modular slices — backend + frontend + auth + tests.
 Goal: migrate 5 core business domains into vertical-slice modules.
 Order: catalog → billing → payments → subscriptions → provisioning (upstream → downstream).
 
-### Issue 3.1: `modules/catalog/` — ✅ scaffold + Hono + REST client + legacy tRPC removed (Mar 2026)
+### Issue 3.1: `modules/catalog/` — ✅ COMPLETE
 **Delivered**: `@panel1/mod-catalog` (`schema`, `CatalogService`, `routes.ts`, permissions seed-aligned). Host `catalogRuntime.ts` wires `ComponentProviderRegistry`, `ComponentManagementService`, `ComponentLifecycleService` after `initializeServices()`. Public storefront: `GET /api/catalog/public/products` (auth/tenant skipped for `/api/catalog/public/*`). Legacy `plans` table: `/api/catalog/legacy-plans*`. Subscribed instance ops (ex–`components` router): `/api/catalog/instances/*`. **Removed**: `routers/catalog.ts`, `components.ts`, `plans.ts`; `lib/catalog/*` except `ComponentProviderRegistry` + `catalogRuntime`; `apps/web` catalog/plans/components pages use `catalogApi.ts` + React Query. **Deferred (3.6)**: Drizzle tables still in `apps/api/src/db/schema/` (module ships parallel schema merge for relational queries).
-**Source (historical)**: was `lib/catalog/`, `lib/components/` lifecycle, three tRPC routers, `db/schema/catalog.ts` + `componentProviders.ts`.
 
-### Issue 3.2: `modules/billing/`
-Source: `lib/invoice/` (7 files, 37KB), `lib/dunning/` (1 file, 12KB), `routers/invoices.ts`, schema files. Tables: 4. Services: InvoiceNumberService, InvoicePDFService, TaxCalculationService, DunningManager. Frontend: AdminBilling, AdminInvoices, ClientInvoices.
+### Issue 3.2: `modules/billing/` — ✅ COMPLETE
+**Delivered**: `@panel1/mod-billing` — `BillingService` implements `IBillingService` (invoice CRUD + items, auto-numbering, PDF generation via PDFKit, dunning cycle automation, credit notes). 4 tables (`invoices`, `invoice_items`, `invoice_counters`, `dunning_attempts`). OpenAPI Hono routes with Zod validation. Config: `taxEnabled`, `defaultCurrency`, `invoicePrefix`, `dueDays`. Permissions: `billing.invoices.view/create/edit/delete/send`, `billing.credits.view/manage`. Events: `invoice.created/sent/paid/overdue/cancelled/refunded`, `credit.created/applied`. **Removed**: `lib/invoice/` (7 files, 37KB), `lib/dunning/DunningEmailService.ts` (12KB), `routers/invoices.ts`. **Frontend**: `billingApi.ts` REST client.
 
-### Issue 3.3: `modules/payments/`
-Source: `lib/payments/` (7 files, 35KB), `routers/payment-gateways.ts`, schema files. Tables: 3. Services: PaymentService, PaymentGatewayManager, StripeGateway. Implements `IPaymentGateway`. Frontend: AdminPaymentGateways.
+### Issue 3.3: `modules/payments/` — ✅ COMPLETE
+**Delivered**: `@panel1/mod-payments` — `PaymentService` implements `IPaymentService` (charge processing, gateway management, refunds, webhook handling). `StripeGatewayImpl` implements `IPaymentGateway` from `@panel1/types/extensions`. 3 tables (`payments`, `payment_attempts`, `payment_gateway_configs`). OpenAPI Hono routes. Config: `defaultGateway`, `autoCapture`, `retryFailedPayments`. Permissions: `payments.view/create/manage`, `payments.gateways.view/manage`. Events: `payment.initiated/succeeded/failed/refunded`. **Removed**: `lib/payments/` (7 files, 35KB), `routers/payment-gateways.ts`, `lib/payments/interfaces/PaymentGateway.ts`. **Frontend**: existing admin payment gateway pages.
 
-### Issue 3.4: `modules/subscriptions/`
-Source: `lib/subscription/` (2 files, 45KB), `routers/subscriptions.ts`, schema files. Tables: 4. Services: SubscriptionService (state machine). Cross-module: `payment.succeeded` → activate. Frontend: AdminSubscriptions, ClientSubscriptions.
+### Issue 3.4: `modules/subscriptions/` — ✅ COMPLETE
+**Delivered**: `@panel1/mod-subscriptions` — `SubscriptionService` implements `ISubscriptionService` (full lifecycle: create → activate → renew → suspend → cancel → terminate, proration, plan changes, trial support). 3 tables (`subscriptions`, `subscription_components`, `subscription_state_changes`). Reacts to `payment.succeeded/failed`, `invoice.overdue`. Cron jobs: `subscriptions-renewal-sweep` (daily 2am), `subscriptions-cancellation-sweep` (daily 3am). 8 events: `subscription.created/activated/renewed/suspended/cancelled/past_due/terminated/plan_changed`. Config: `defaultTrialDays`, `maxFailedPaymentAttempts`, `gracePeriodDays`. Permissions: `subscriptions.view/create/edit/delete/cancel/view_own`. **Removed**: `lib/subscription/SubscriptionService.ts` (1028 lines), `lib/subscription/DunningManager.ts` (430 lines), `lib/jobs/processors/SubscriptionRenewalProcessor.ts`.
 
-### Issue 3.5: `modules/provisioning/`
-Source: `lib/provisioning/` (4+ files, 25KB), `routers/provisioning.ts`, schema. Tables: 3. Services: ProvisioningManager, CpanelAdapter. Implements `IProvisioner`. Cross-module: `subscription.activated` → provision. Frontend: AdminProvisioning.
+### Issue 3.5: `modules/provisioning/` — ✅ COMPLETE
+**Delivered**: `@panel1/mod-provisioning` — `ProvisioningService` implements `IProvisioningService` (provider CRUD, service instance lifecycle, cPanel adapter, task queue with retries, health checks). `CpanelAdapter` implements `IProvisioner`. 3 tables (`provisioning_providers`, `service_instances`, `provisioning_tasks`). Reacts to `subscription.activated` (auto-provision), `subscription.suspended` (auto-suspend), `subscription.terminated` (auto-terminate). Cron: `provisioning-health-check` (every 6h). 6 events: `provisioning.started/completed/failed/suspended/unsuspended/terminated`. Config: `defaultProvisioningType`, `autoProvisionOnActivation`, `healthCheckIntervalHours`. Permissions: `provisioning.instances.view/manage`, `provisioning.providers.view/manage`. **Removed**: `lib/provisioning/` (4 files, 25KB), `lib/jobs/processors/ProvisioningProcessor.ts`. **Frontend**: `provisioningApi.ts` REST client.
 
 ### Issue 3.6: Per-Module DB Schema Ownership
 Move schema files from `db/schema/*.ts` into respective modules. Keep core tables in `apps/api/`. Handle cross-module FKs via service calls.

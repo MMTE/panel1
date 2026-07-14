@@ -654,12 +654,13 @@ Module events follow the pattern `{domain}.{action}` and are typed via declarati
 ```
 subscription.created     subscription.activated    subscription.renewed
 subscription.cancelled   subscription.suspended    subscription.past_due
+subscription.terminated  subscription.plan_changed
 invoice.created          invoice.sent              invoice.paid
 invoice.overdue          invoice.cancelled         invoice.refunded
 payment.initiated        payment.succeeded         payment.failed
 payment.refunded
 provisioning.started     provisioning.completed    provisioning.failed
-provisioning.suspended   provisioning.terminated
+provisioning.suspended   provisioning.unsuspended  provisioning.terminated
 client.created           client.updated            client.suspended
 user.registered          user.login
 support.ticket.created   support.ticket.replied    support.ticket.resolved

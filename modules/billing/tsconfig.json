@@ -1,7 +1,7 @@
 {
   "extends": "../../tsconfig.json",
   "compilerOptions": {
-    "rootDir": "./src",
+    
     "baseUrl": ".",
     "paths": {
       "@panel1/types": ["../../packages/types/src"],

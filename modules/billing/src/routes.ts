@@ -317,9 +317,9 @@ export function billingRoutes(ctx: ModuleContext) {
     const user = c.get('user') as Panel1AuthUser;
     const invoice = await billing.createInvoice(
       {
-        clientId: body.clientId,
+        clientId: body.clientId!,
         subscriptionId: body.subscriptionId,
-        items: body.items,
+        items: body.items as any,
         tax: body.tax,
         dueDate: body.dueDate,
         currency: body.currency,
@@ -468,7 +468,7 @@ export function billingRoutes(ctx: ModuleContext) {
     const user = c.get('user') as Panel1AuthUser;
     const db = ctx.db as any;
     const { invoices: inv } = await import('./schema.js');
-    const { eq, and, desc, count } = await import('drizzle-orm');
+    const { eq, and, desc, sql } = await import('drizzle-orm');
 
     const [clientRecord] = await db
       .select({ id: sql`id` })
@@ -498,7 +498,7 @@ export function billingRoutes(ctx: ModuleContext) {
       .offset(q.offset);
 
     const [{ total }] = await db
-      .select({ total: count() })
+      .select({ total: sql<number>`count(*)::int` })
       .from(inv)
       .where(and(...conditions));
 

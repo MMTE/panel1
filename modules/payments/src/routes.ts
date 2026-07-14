@@ -352,7 +352,7 @@ export function paymentRoutes(ctx: ModuleContext) {
     const svc = getSvc();
     const body = c.req.valid('json');
     const tenantId = c.get('tenantId') as string;
-    const gateway = await svc.createGateway(body, tenantId);
+    const gateway = await svc.createGateway(body as any, tenantId);
     return c.json(gateway, 201);
   });
 
@@ -406,7 +406,7 @@ export function paymentRoutes(ctx: ModuleContext) {
     const svc = getSvc();
     const body = c.req.valid('json');
     const tenantId = c.get('tenantId') as string;
-    const charge = await svc.createCharge(body, tenantId);
+    const charge = await svc.createCharge(body as any, tenantId);
     return c.json(charge, 201);
   });
 
