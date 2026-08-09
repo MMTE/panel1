@@ -17,11 +17,12 @@
   },
   "scripts": {
     "build": "tsc --noEmit",
-    "lint": "eslint src --ext .ts",
+    "type-check": "tsc --noEmit",
+    "lint": "eslint src",
     "test": "vitest run"
   },
   "dependencies": {
-    "@panel1/types": "*",
+    "@panel1/types": "workspace:*",
     "bullmq": "^5.15.0",
     "drizzle-orm": "^0.29.3",
     "hono": "^4.12.8",

@@ -10,12 +10,15 @@
     "modules/*"
   ],
   "scripts": {
+    "preinstall": "npx only-allow pnpm",
     "dev": "turbo run dev --parallel",
     "dev:api": "turbo run dev --filter=@panel1/api",
     "dev:web": "turbo run dev --filter=@panel1/web",
     "build": "turbo run build",
+    "type-check": "turbo run type-check",
     "lint": "turbo run lint",
     "test": "turbo run test",
+    "changeset": "changeset",
     "db:generate": "turbo run db:generate --filter=@panel1/api",
     "db:migrate": "turbo run db:migrate --filter=@panel1/api",
     "db:studio": "turbo run db:studio --filter=@panel1/api"
@@ -47,8 +50,8 @@
     "@trpc/react-query": "^10.45.0",
     "@trpc/server": "^10.45.0",
     "dotenv": "^16.3.1",
-    "drizzle-kit": "^0.19.13",
-    "drizzle-orm": "^0.28.6",
+    "drizzle-kit": "^0.20.13",
+    "drizzle-orm": "^0.29.3",
     "lucide-react": "^0.344.0",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
@@ -56,16 +59,16 @@
     "zod": "^3.22.4"
   },
   "devDependencies": {
-    "@types/jest": "^30.0.0",
+    "@changesets/cli": "^2.31.0",
+    "@eslint/js": "^10.0.1",
     "@types/react": "^18.2.43",
     "@types/react-dom": "^18.2.17",
-    "@typescript-eslint/eslint-plugin": "^6.21.0",
-    "@typescript-eslint/parser": "^6.21.0",
     "@vitejs/plugin-react": "^4.2.1",
     "autoprefixer": "^10.4.16",
-    "eslint": "^8.55.0",
-    "eslint-plugin-react-hooks": "^4.6.0",
+    "eslint": "^9.39.5",
+    "eslint-plugin-react-hooks": "^5.2.0",
     "eslint-plugin-react-refresh": "^0.4.5",
+    "only-allow": "^1.2.1",
     "postcss": "^8.4.32",
     "tailwindcss": "^3.3.6",
     "ts-node": "^10.9.2",
@@ -77,8 +80,7 @@
     "vitest": "^1.1.0"
   },
   "engines": {
-    "node": ">=18.0.0",
-    "npm": ">=8.0.0"
+    "node": ">=18.0.0"
   },
-  "packageManager": "npm@10.0.0"
+  "packageManager": "pnpm@11.10.0"
 }

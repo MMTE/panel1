@@ -16,8 +16,8 @@
   },
   "dependencies": {
     "@hono/zod-openapi": "^0.18.4",
-    "@panel1/core": "*",
-    "@panel1/types": "*",
+    "@panel1/core": "workspace:*",
+    "@panel1/types": "workspace:*",
     "drizzle-orm": "^0.29.3",
     "hono": "^4.7.5",
     "pdfkit": "^0.15.0",

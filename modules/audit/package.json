@@ -12,11 +12,12 @@
   },
   "scripts": {
     "build": "tsc --noEmit",
-    "lint": "eslint src --ext .ts"
+    "type-check": "tsc --noEmit",
+    "lint": "eslint src"
   },
   "dependencies": {
-    "@panel1/types": "*",
-    "@panel1/core": "*",
+    "@panel1/types": "workspace:*",
+    "@panel1/core": "workspace:*",
     "@hono/zod-openapi": "^0.18.4",
     "drizzle-orm": "^0.29.3",
     "hono": "^4.7.5",

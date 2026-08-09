@@ -1,0 +1,8 @@
+packages:
+  - "apps/*"
+  - "packages/*"
+  - "modules/*"
+allowBuilds:
+  es5-ext: true
+  esbuild: true
+  msgpackr-extract: true

@@ -92,9 +92,6 @@ temp/
 ehthumbs.db
 Thumbs.db
 
-# Prisma
-apps/api/prisma/migrations/
-
 # Turborepo cache
 .turbo/
 
