@@ -1,0 +1,60 @@
+# GitHub Actions — affected-only CI for the Panel1 Turborepo monorepo
+name: CI
+
+on:
+  push:
+    branches: [main, dev]
+  pull_request:
+
+jobs:
+  build-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # full history needed for affected-package detection
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # Local Turborepo cache layer (complements optional remote cache)
+      - name: Cache Turborepo
+        uses: actions/cache@v4
+        with:
+          path: .turbo
+          key: ${{ runner.os }}-turbo-${{ github.sha }}
+          restore-keys: ${{ runner.os }}-turbo-
+
+      # Determine the base ref for affected filtering
+      - name: Set base ref
+        id: base
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            echo "ref=${{ github.event.pull_request.base.ref }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "ref=${{ github.ref_name }}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Build (affected)
+        run: pnpm exec turbo run build --filter=...[origin/${{ steps.base.outputs.ref }}]
+        env:
+          TURBO_TOKEN: ${{ secrets.TURBO_TOKEN }}
+          TURBO_TEAM: ${{ vars.TURBO_TEAM }}
+
+      - name: Type-check (affected)
+        run: pnpm exec turbo run type-check --filter=...[origin/${{ steps.base.outputs.ref }}]
+
+      - name: Test (affected)
+        run: pnpm exec turbo run test --filter=...[origin/${{ steps.base.outputs.ref }}]
+
+      - name: Lint (affected)
+        run: pnpm exec turbo run lint --filter=...[origin/${{ steps.base.outputs.ref }}]
