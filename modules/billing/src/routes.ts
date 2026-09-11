@@ -401,7 +401,10 @@ export function billingRoutes(ctx: ModuleContext) {
     const tenantId = c.get('tenantId') as string;
     try {
       const pdfBuffer = await billing.generatePdf(id, tenantId);
-      return c.body(pdfBuffer, 200, {
+      // Buffer<ArrayBufferLike> doesn't satisfy Hono's TypedResponse body
+      // (Uint8Array<ArrayBuffer>) under @types/node 22 — copy into a plain
+      // Uint8Array so the invoice PDF route typechecks.
+      return c.body(new Uint8Array(pdfBuffer), 200, {
         'Content-Type': 'application/pdf',
         'Content-Disposition': `inline; filename="invoice-${id}.pdf"`,
       });
