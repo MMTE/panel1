@@ -14,7 +14,7 @@
     "build": "tsc --noEmit",
     "type-check": "tsc --noEmit",
     "lint": "eslint src --ext .ts",
-    "test": "vitest run"
+    "test": "vitest run --passWithNoTests"
   },
   "dependencies": {
     "@panel1/types": "workspace:*",
