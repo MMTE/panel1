@@ -106,7 +106,9 @@ class StripeGatewayImpl implements IPaymentGateway {
     const parsed = stripeConfigSchema.parse(config);
     if (!parsed.secretKey) throw new Error('Stripe secret key is required');
     this.stripe = new Stripe(parsed.secretKey, {
-      apiVersion: '2025-05-28.basil',
+      // must equal the installed stripe SDK's LatestApiVersion (17.7.0 →
+      // '2025-02-24.acacia'); '2025-05-28.basil' belongs to stripe 18.x.
+      apiVersion: '2025-02-24.acacia',
       appInfo: { name: 'Panel1', version: '0.1.0' },
     });
   }

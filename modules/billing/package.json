@@ -12,7 +12,9 @@
   },
   "scripts": {
     "build": "tsc --noEmit",
-    "lint": "eslint src --ext .ts"
+    "type-check": "tsc --noEmit",
+    "lint": "eslint src --ext .ts",
+    "test": "vitest run"
   },
   "dependencies": {
     "@hono/zod-openapi": "^0.18.4",
@@ -25,6 +27,7 @@
   },
   "devDependencies": {
     "@electric-sql/pglite": "^0.2.17",
-    "typescript": "^5.5.3"
+    "typescript": "^5.5.3",
+    "vitest": "^1.1.0"
   }
 }
