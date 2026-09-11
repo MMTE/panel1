@@ -34,27 +34,33 @@ jobs:
           key: ${{ runner.os }}-turbo-${{ github.sha }}
           restore-keys: ${{ runner.os }}-turbo-
 
-      # Determine the base ref for affected filtering
-      - name: Set base ref
+      # Determine the turbo filter for affected-package detection.
+      # - pull_request: diff against the base branch's origin ref.
+      # - push: diff against the commit the branch pointed at before this push
+      #   (github.event.before). On force-push / branch creation the before-SHA
+      #   is missing or unreachable, so run everything (empty filter).
+      - name: Set turbo filter
         id: base
         run: |
           if [ "${{ github.event_name }}" = "pull_request" ]; then
-            echo "ref=${{ github.event.pull_request.base.ref }}" >> "$GITHUB_OUTPUT"
+            echo "filter=--filter=...[origin/${{ github.event.pull_request.base.ref }}]" >> "$GITHUB_OUTPUT"
+          elif [ -n "${{ github.event.before }}" ] && [ "${{ github.event.forced }}" != "true" ] && [ "${{ github.event.before }}" != "0000000000000000000000000000000000000000" ]; then
+            echo "filter=--filter=...[${{ github.event.before }}]" >> "$GITHUB_OUTPUT"
           else
-            echo "ref=${{ github.ref_name }}" >> "$GITHUB_OUTPUT"
+            echo "filter=" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Build (affected)
-        run: pnpm exec turbo run build --filter=...[origin/${{ steps.base.outputs.ref }}]
+        run: pnpm exec turbo run build ${{ steps.base.outputs.filter }}
         env:
           TURBO_TOKEN: ${{ secrets.TURBO_TOKEN }}
           TURBO_TEAM: ${{ vars.TURBO_TEAM }}
 
       - name: Type-check (affected)
-        run: pnpm exec turbo run type-check --filter=...[origin/${{ steps.base.outputs.ref }}]
+        run: pnpm exec turbo run type-check ${{ steps.base.outputs.filter }}
 
       - name: Test (affected)
-        run: pnpm exec turbo run test --filter=...[origin/${{ steps.base.outputs.ref }}]
+        run: pnpm exec turbo run test ${{ steps.base.outputs.filter }}
 
       - name: Lint (affected)
-        run: pnpm exec turbo run lint --filter=...[origin/${{ steps.base.outputs.ref }}]
+        run: pnpm exec turbo run lint ${{ steps.base.outputs.filter }}
