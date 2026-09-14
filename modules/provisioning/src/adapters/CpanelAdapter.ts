@@ -5,110 +5,132 @@ import type {
   HealthCheckResult,
   ProvisioningConfig,
 } from '../types.js';
+import { WhmClient } from './whm-client.js';
 
+/**
+ * cPanel/WHM adapter backed by real WHM API1 calls (WhmClient).
+ *
+ * Every operation hits the WHM API and failures surface as
+ * `success: false` with the cPanel statusmsg — never a fake success
+ * (panel1 issue #62).
+ */
 export class CpanelAdapter implements IProvisioner {
   private config: ProvisioningConfig;
-  private baseUrl: string;
+  private client: WhmClient;
 
   constructor(config: ProvisioningConfig) {
     this.config = config;
-    this.baseUrl = `${config.useSSL ? 'https' : 'http'}://${config.hostname}:${config.port}`;
+    this.client = new WhmClient(config);
   }
 
   async provision(params: ServiceParameters): Promise<ProvisioningResult> {
     try {
+      const username = params.username || this.generateUsername(params.domain || params.serviceName);
+      const password = params.password || this.generatePassword();
+      const domain = params.domain || params.serviceName;
+
+      const result = await this.client.createacct({
+        username,
+        password,
+        domain,
+        contactemail: params.email,
+        plan: params.packageName,
+        quota: params.diskQuota,
+        bandwidth: params.bandwidthQuota,
+        maxsql: params.databases,
+        maxsub: params.subdomains,
+        maxpop: params.emailAccounts,
+      });
+
+      const ip = (result as any)?.ip || (result as any)?.options?.ip;
+
       return {
         success: true,
-        message: 'cPanel account creation initiated',
+        message: 'cPanel account created',
         data: {
-          remoteId: this.generateUsername(params.domain || params.serviceName),
-          username: this.generateUsername(params.domain || params.serviceName),
-          password: this.generatePassword(),
-          controlPanelUrl: `${this.baseUrl}:2083`,
+          remoteId: username,
+          username,
+          password,
+          controlPanelUrl: this.controlPanelUrl(),
+          ...(ip ? { ipAddress: ip } : {}),
         },
       };
     } catch (error) {
-      return {
-        success: false,
-        error: { message: error instanceof Error ? error.message : 'Unknown error' },
-      };
+      return this.failure('provision', error);
     }
   }
 
   async suspend(params: ServiceParameters): Promise<ProvisioningResult> {
     try {
+      const user = this.resolveUser(params);
+      await this.client.suspendacct(user);
       return { success: true, message: 'cPanel account suspended' };
     } catch (error) {
-      return {
-        success: false,
-        error: { message: error instanceof Error ? error.message : 'Unknown error' },
-      };
+      return this.failure('suspend', error);
     }
   }
 
   async unsuspend(params: ServiceParameters): Promise<ProvisioningResult> {
     try {
+      const user = this.resolveUser(params);
+      await this.client.unsuspendacct(user);
       return { success: true, message: 'cPanel account unsuspended' };
     } catch (error) {
-      return {
-        success: false,
-        error: { message: error instanceof Error ? error.message : 'Unknown error' },
-      };
+      return this.failure('unsuspend', error);
     }
   }
 
   async terminate(params: ServiceParameters): Promise<ProvisioningResult> {
     try {
+      const user = this.resolveUser(params);
+      await this.client.removeacct(user);
       return { success: true, message: 'cPanel account terminated' };
     } catch (error) {
-      return {
-        success: false,
-        error: { message: error instanceof Error ? error.message : 'Unknown error' },
-      };
+      return this.failure('terminate', error);
     }
   }
 
   async modify(params: ServiceParameters): Promise<ProvisioningResult> {
-    return { success: true, message: 'cPanel account modified' };
+    return { success: false, error: { message: 'modify is not supported by the WHM adapter yet' } };
   }
 
   async reinstall(params: ServiceParameters): Promise<ProvisioningResult> {
-    return { success: true, message: 'cPanel account reinstalled' };
+    return { success: false, error: { message: 'reinstall is not supported by the WHM adapter yet' } };
   }
 
   async healthCheck(): Promise<HealthCheckResult> {
-    try {
-      const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), this.config.timeout || 10000);
-      const response = await fetch(`${this.baseUrl}:2087/json-api/version`, {
-        method: 'GET',
-        signal: controller.signal,
-        headers: {
-          'Authorization': `WHM ${this.config.username || 'root'}:${this.config.apiKey}`,
-        },
-      });
-      clearTimeout(timeout);
-
-      if (response.ok) {
-        return { healthy: true, status: 'healthy', message: 'cPanel server is responding' };
-      }
-      return { healthy: false, status: 'warning', message: `HTTP ${response.status}` };
-    } catch {
-      return { healthy: false, status: 'error', message: 'Connection failed' };
-    }
+    return this.client.healthCheck();
   }
 
   async testConnection(): Promise<boolean> {
-    try {
-      const health = await this.healthCheck();
-      return health.healthy;
-    } catch {
-      return false;
-    }
+    const health = await this.healthCheck();
+    return health.healthy;
   }
 
   async validateParameters(params: ServiceParameters): Promise<boolean> {
     return !!params.serviceName;
+  }
+
+  private resolveUser(params: ServiceParameters): string {
+    return params.username || this.generateUsername(params.domain || params.serviceName);
+  }
+
+  /** cPanel user-facing URL — built from the config, port appended exactly once. */
+  private controlPanelUrl(): string {
+    const scheme = this.config.useSSL ? 'https' : 'http';
+    return `${scheme}://${this.config.hostname}:2083`;
+  }
+
+  private failure(operation: string, error: unknown): ProvisioningResult {
+    return {
+      success: false,
+      error: {
+        message:
+          error instanceof Error
+            ? error.message
+            : `WHM ${operation} failed with an unknown error`,
+      },
+    };
   }
 
   private generateUsername(domain: string): string {
